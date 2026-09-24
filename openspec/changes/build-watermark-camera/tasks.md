@@ -83,12 +83,12 @@ convergence_policy:
   - 约束：空地点抛出明确输入错误；视频快照后不可变；图钉用绘制图形。
   - 验证：`dart format --output=none --set-exit-if-changed lib`、`flutter analyze`；预期无格式或静态分析错误；周日/跨日/长文本实效由用户真机核对。
 
-- [x] 2.2 实现地点解析、权限状态和本机设置。
+- [x] 2.2 实现街道级地点解析、权限状态和本机设置。
   - 依据：时间及地点来源 Requirement；D-004；REF-008。
   - 读取：`design.md` D-004；`lib/watermark/watermark_snapshot.dart`；`pubspec.yaml`。
-  - 修改：`lib/location/location_service.dart`、`lib/settings/watermark_settings.dart`、`ios/Runner/Info.plist`；使用 60 秒有效期、中文地名、手动地点优先、本机持久化及设置入口。
+  - 修改：`lib/location/location_service.dart`、`lib/settings/watermark_settings.dart`、`ios/Runner/Info.plist`；使用 60 秒有效期和高精度定位，按城市、区县、街道输出中文地名，手动地点优先并保留本机持久化及设置入口。
   - 约束：定位拒绝/超时/编码失败显式呈现；无地点不可生成快照；仅需 When In Use 权限。
-  - 验证：`dart format --output=none --set-exit-if-changed lib`、`flutter analyze`；预期无格式或静态分析错误；新鲜/过期/拒绝/手动覆盖/重启持久化由用户真机核对。
+  - 验证：`dart format --output=none --set-exit-if-changed lib`、`flutter analyze`；预期无格式或静态分析错误；街道字段、重复地名去重、新鲜/过期/拒绝/手动覆盖/重启持久化由用户真机核对。
 
 - [x] 3.1 实现相机预览、模式及生命周期状态机。
   - 依据：拍照录像 Requirement；前后台恢复 Requirement；D-002/D-007；REF-003/004。
@@ -97,10 +97,10 @@ convergence_policy:
   - 约束：只能 ready 捕获；录制中切后台先请求结束；错误状态可重试，不发生旧 controller 覆盖新会话。
   - 验证：`dart format --output=none --set-exit-if-changed lib`、`flutter analyze`；预期无格式或静态分析错误；生命周期行为由用户真机核对。
 
-- [x] 3.2 增加前后镜头、闪光与补光 UI。
-  - 依据：拍照录像闪光镜头 Requirement；D-005；REF-005。
+- [x] 3.2 增加前后镜头、闪光与补光 UI，并整理相机控制布局。
+  - 依据：拍照录像闪光镜头 Requirement；D-005/D-009；REF-005。
   - 读取：`design.md` D-005；`lib/camera/camera_coordinator.dart`、`camera_screen.dart`。
-  - 修改：`lib/camera/camera_coordinator.dart`、`lib/camera/camera_screen.dart`；按镜头和模式提供合法选项，切镜头先关 torch。
+  - 修改：`lib/camera/camera_coordinator.dart`、`lib/camera/camera_screen.dart`；按镜头和模式提供合法选项，切镜头先关 torch，以取景优先的半透明控件面板呈现状态、地点和拍摄操作。
   - 约束：前摄不支持硬件时禁用控制；录制中禁止镜头与模式切换；保留 CameraException 错误码。
   - 验证：`dart format --output=none --set-exit-if-changed lib`、`flutter analyze`；预期无格式或静态分析错误；镜头和闪光行为由用户真机核对。
 
@@ -159,7 +159,7 @@ convergence_policy:
   - 修改：`codemagic.yaml`、必要时 `.gitignore`；保留 `ios-personal` 流程，移除每次生成 host，锁文件安装、无签名构建、非空 IPA 打包和 artifacts。
   - 约束：不能把无签名 IPA 宣称可直接装真机；不能提交签名凭证。
   - 验证：`flutter pub get --enforce-lockfile`、`dart format --output=none --set-exit-if-changed lib`、`flutter analyze`，Codemagic 工作流日志与非空 IPA；预期静态和编译全部通过。
-  - 本次验证：用户先后提供两次 Codemagic 云构建日志，依赖解析均通过；第二次 Swift 编译显示 `AVAssetTrack.formatDescriptions` 元素为 `Any`，本轮已显式 fail-fast 转换为 `[CMFormatDescription]` 后读取 subtype。上一轮 `flutter pub get --enforce-lockfile`、Dart 格式检查、`flutter analyze` 和 OpenSpec 严格校验均通过；当前 Windows 环境无法运行 Xcode，需再次由 Codemagic 确认 Swift 编译及非空 IPA；未运行 `flutter test`。
+  - 本次验证：用户先后提供两次 Codemagic 云构建日志，依赖解析均通过；第二次 Swift 编译显示 `AVAssetTrack.formatDescriptions` 元素为 `Any`，本轮改为逐条 fail-fast 转换为 `CMFormatDescription` 后读取 subtype。Dart 格式检查、`flutter analyze` 和 OpenSpec 严格校验通过；当前 Windows 环境无法运行 Xcode，仍需 Codemagic 确认 Swift 编译及非空 IPA；未运行 `flutter test`。
 
 ## 用户真机验收矩阵（iPhone 11，用户执行）
 

@@ -561,20 +561,20 @@ final class WatermarkBridge {
       )
     }
 
-    let videoFormatDescriptions = videoTrack.formatDescriptions as! [CMFormatDescription]
-    let videoCodecs: [FourCharCode] = videoFormatDescriptions.map { description in
-      CMFormatDescriptionGetMediaSubType(description)
+    let videoCodecs: [FourCharCode] = videoTrack.formatDescriptions.map { value in
+      let description: CMFormatDescription = value as! CMFormatDescription
+      return CMFormatDescriptionGetMediaSubType(description)
     }
     guard videoCodecs.contains(kCMVideoCodecType_H264) else {
       throw WatermarkBridgeError.invalidRenderedVideo("The exported video codec is not H.264.")
     }
 
     let audioTracks = outputAsset.tracks(withMediaType: .audio)
-    let audioFormatDescriptions = audioTracks.flatMap {
-      $0.formatDescriptions as! [CMFormatDescription]
-    }
-    let audioCodecs: [FourCharCode] = audioFormatDescriptions.map { description in
-      CMFormatDescriptionGetMediaSubType(description)
+    let audioCodecs: [FourCharCode] = audioTracks.flatMap { track in
+      track.formatDescriptions.map { value in
+        let description: CMFormatDescription = value as! CMFormatDescription
+        return CMFormatDescriptionGetMediaSubType(description)
+      }
     }
     guard audioCodecs.contains(kAudioFormatMPEG4AAC) else {
       throw WatermarkBridgeError.invalidRenderedVideo("The exported audio codec is not AAC.")

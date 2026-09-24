@@ -149,7 +149,7 @@ class LocationService {
     final Position position = await _withLocationTimeout<Position>(
       Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
+          accuracy: LocationAccuracy.best,
         ),
       ),
     );
@@ -205,14 +205,34 @@ class LocationService {
 
   String _formatPlacemark(Placemark placemark) {
     final String? locality = _nonEmpty(placemark.locality);
-    final String? secondary =
-        _nonEmpty(placemark.subLocality) ?? _nonEmpty(placemark.name);
+    final String? subAdministrativeArea = _nonEmpty(
+      placemark.subAdministrativeArea,
+    );
+    final String? street =
+        _nonEmpty(placemark.street) ??
+        _nonEmpty(placemark.thoroughfare) ??
+        _nonEmpty(placemark.name);
     final List<String> parts = <String>[];
-    if (locality != null) {
-      parts.add(locality);
-    }
-    if (secondary != null && secondary != locality) {
-      parts.add(secondary);
+    for (final String? value in <String?>[
+      locality ?? subAdministrativeArea,
+      _nonEmpty(placemark.subLocality),
+      street,
+    ]) {
+      if (value == null) {
+        continue;
+      }
+      String uniquePart = value;
+      for (final String existing in parts) {
+        if (existing.contains(uniquePart)) {
+          uniquePart = '';
+          break;
+        }
+        uniquePart = uniquePart.replaceAll(existing, '');
+      }
+      uniquePart = uniquePart.trim();
+      if (uniquePart.isNotEmpty && !parts.contains(uniquePart)) {
+        parts.add(uniquePart);
+      }
     }
     return parts.join('');
   }

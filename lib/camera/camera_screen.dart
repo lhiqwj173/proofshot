@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -22,6 +23,10 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen> {
+  static const Color _accentColor = Color(0xFF62D9D1);
+  static const Color _recordingColor = Color(0xFFFF5B62);
+  static const Color _panelColor = Color(0xE6101722);
+
   late final CameraCoordinator _cameraCoordinator;
   late final LocationService _locationService;
   late final WatermarkBridge _watermarkBridge;
@@ -535,49 +540,179 @@ class _CameraScreenState extends State<CameraScreen> {
     };
   }
 
+  Widget _buildControlFace({
+    required IconData icon,
+    required String label,
+    required bool enabled,
+  }) {
+    final Color foreground = enabled ? Colors.white : Colors.white38;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: enabled ? 0.12 : 0.05),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 22, color: foreground),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: foreground, fontSize: 11),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCameraSwitchControl(bool controlsEnabled) {
+    final bool canSwitch =
+        controlsEnabled && _cameraCoordinator.canSwitchCamera;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        IconButton(
+          tooltip: canSwitch ? '切换前后摄像头' : '当前设备没有可切换的镜头',
+          onPressed: canSwitch
+              ? () => unawaited(_cameraCoordinator.switchCamera())
+              : null,
+          style: IconButton.styleFrom(
+            fixedSize: const Size(48, 48),
+            padding: EdgeInsets.zero,
+            backgroundColor: Colors.white.withValues(
+              alpha: canSwitch ? 0.12 : 0.05,
+            ),
+            foregroundColor: canSwitch ? Colors.white : Colors.white38,
+            shape: const CircleBorder(),
+          ),
+          icon: const Icon(Icons.cameraswitch_outlined, size: 22),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          '切换镜头',
+          style: TextStyle(
+            color: canSwitch ? Colors.white : Colors.white38,
+            fontSize: 11,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildFlashControl(bool controlsEnabled) {
     final String? unavailableReason = _cameraCoordinator.flashUnavailableReason;
-    if (unavailableReason != null) {
-      return IconButton(
-        onPressed: null,
-        tooltip: unavailableReason,
-        color: Colors.white38,
-        icon: const Icon(Icons.flash_off),
-      );
-    }
+    final bool enabled = controlsEnabled && unavailableReason == null;
+    final FlashMode mode = _cameraCoordinator.flashMode;
+    return Tooltip(
+      message: unavailableReason ?? '闪光和补光设置',
+      child: PopupMenuButton<FlashMode>(
+        enabled: enabled,
+        tooltip: '',
+        onSelected: (FlashMode selectedMode) {
+          unawaited(_cameraCoordinator.setFlashMode(selectedMode));
+        },
+        itemBuilder: (BuildContext context) => _cameraCoordinator
+            .supportedFlashModes
+            .map(
+              (FlashMode supportedMode) => PopupMenuItem<FlashMode>(
+                value: supportedMode,
+                child: Text(_flashLabel(supportedMode)),
+              ),
+            )
+            .toList(growable: false),
+        child: _buildControlFace(
+          icon: mode == FlashMode.off ? Icons.flash_off : Icons.flash_on,
+          label: unavailableReason == null ? _flashLabel(mode) : '不可用',
+          enabled: enabled,
+        ),
+      ),
+    );
+  }
 
-    return PopupMenuButton<FlashMode>(
-      enabled: controlsEnabled,
-      tooltip: '闪光和补光设置',
-      onSelected: (FlashMode mode) {
-        unawaited(_cameraCoordinator.setFlashMode(mode));
-      },
-      itemBuilder: (BuildContext context) => _cameraCoordinator
-          .supportedFlashModes
-          .map(
-            (FlashMode mode) => PopupMenuItem<FlashMode>(
-              value: mode,
-              child: Text(_flashLabel(mode)),
-            ),
-          )
-          .toList(growable: false),
+  Widget _buildCaptureModeControl(bool canChangeMode) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+      ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(
-            _cameraCoordinator.flashMode == FlashMode.off
-                ? Icons.flash_off
-                : Icons.flash_on,
-            color: controlsEnabled ? Colors.white : Colors.white38,
+          _buildCaptureModeOption(
+            mode: CameraCaptureMode.photo,
+            icon: Icons.photo_camera_outlined,
+            label: '照片',
+            canChangeMode: canChangeMode,
           ),
-          const SizedBox(width: 4),
-          Text(
-            _flashLabel(_cameraCoordinator.flashMode),
-            style: TextStyle(
-              color: controlsEnabled ? Colors.white : Colors.white38,
-            ),
+          _buildCaptureModeOption(
+            mode: CameraCaptureMode.video,
+            icon: Icons.videocam_outlined,
+            label: '视频',
+            canChangeMode: canChangeMode,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCaptureModeOption({
+    required CameraCaptureMode mode,
+    required IconData icon,
+    required String label,
+    required bool canChangeMode,
+  }) {
+    final bool selected = _cameraCoordinator.captureMode == mode;
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: !canChangeMode || selected
+                ? null
+                : () => unawaited(_cameraCoordinator.setCaptureMode(mode)),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              height: 44,
+              decoration: BoxDecoration(
+                color: selected
+                    ? _accentColor.withValues(alpha: 0.2)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(14),
+                border: selected
+                    ? Border.all(color: _accentColor.withValues(alpha: 0.38))
+                    : null,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Icon(
+                    icon,
+                    size: 19,
+                    color: selected ? _accentColor : Colors.white70,
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: selected ? Colors.white : Colors.white70,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -593,33 +728,313 @@ class _CameraScreenState extends State<CameraScreen> {
         : _cameraCoordinator.captureMode == CameraCaptureMode.photo
         ? () => unawaited(_capturePhoto())
         : () => unawaited(_startVideoRecording());
-    final IconData icon = isRecording
-        ? Icons.stop_rounded
+    final String tooltip = isRecording
+        ? '停止录像'
         : _cameraCoordinator.captureMode == CameraCaptureMode.photo
-        ? Icons.camera_alt_rounded
-        : Icons.fiber_manual_record_rounded;
-    return SizedBox(
-      width: 72,
-      height: 72,
-      child: IconButton.filled(
-        tooltip: isRecording
-            ? '停止录像'
-            : _cameraCoordinator.captureMode == CameraCaptureMode.photo
-            ? '拍摄照片'
-            : '开始录像',
-        onPressed: onPressed,
-        style: IconButton.styleFrom(
-          backgroundColor: isRecording ? Colors.red : Colors.white,
-          foregroundColor: isRecording ? Colors.white : Colors.black,
-          disabledBackgroundColor: Colors.white24,
-          disabledForegroundColor: Colors.white38,
+        ? '拍摄照片'
+        : '开始录像';
+    final Widget centerMark = _mediaBusy
+        ? const SizedBox.square(
+            dimension: 28,
+            child: CircularProgressIndicator(
+              strokeWidth: 3,
+              color: _accentColor,
+            ),
+          )
+        : isRecording
+        ? const Icon(Icons.stop_rounded, size: 30, color: Colors.white)
+        : _cameraCoordinator.captureMode == CameraCaptureMode.video
+        ? const DecoratedBox(
+            decoration: BoxDecoration(
+              color: _recordingColor,
+              shape: BoxShape.circle,
+            ),
+            child: SizedBox.square(dimension: 20),
+          )
+        : const Icon(
+            Icons.camera_alt_rounded,
+            size: 28,
+            color: Color(0xFF17202B),
+          );
+    return Semantics(
+      button: true,
+      enabled: onPressed != null,
+      label: tooltip,
+      child: Tooltip(
+        message: tooltip,
+        child: SizedBox.square(
+          dimension: 82,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onPressed,
+              customBorder: const CircleBorder(),
+              child: Container(
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withValues(
+                      alpha: onPressed == null ? 0.34 : 0.92,
+                    ),
+                    width: 3,
+                  ),
+                ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isRecording ? _recordingColor : Colors.white,
+                  ),
+                  alignment: Alignment.center,
+                  child: centerMark,
+                ),
+              ),
+            ),
+          ),
         ),
-        icon: _mediaBusy
-            ? const SizedBox.square(
-                dimension: 30,
-                child: CircularProgressIndicator(strokeWidth: 3),
-              )
-            : Icon(icon, size: 34),
+      ),
+    );
+  }
+
+  Widget _buildLocationIndicator() {
+    final String location =
+        _locationText ?? (_locationLoading ? '正在获取街道位置…' : '点击填写拍摄地点');
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.48),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+          ),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: _accentColor.withValues(alpha: 0.18),
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: const Icon(
+                  Icons.location_on_outlined,
+                  color: _accentColor,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    const Text(
+                      '拍摄地点',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      location,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: '编辑拍摄地点',
+                onPressed: _openSettings,
+                visualDensity: VisualDensity.compact,
+                color: Colors.white70,
+                icon: const Icon(Icons.edit_location_alt_outlined, size: 20),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMediaMessage(String mediaMessage) {
+    final ButtonStyle actionStyle = TextButton.styleFrom(
+      foregroundColor: _accentColor,
+      visualDensity: VisualDensity.compact,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text(
+            mediaMessage,
+            textAlign: TextAlign.center,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          if (_pendingMedia.any(
+            (PendingWatermarkMedia item) => item.status != 'saving',
+          ))
+            TextButton.icon(
+              style: actionStyle,
+              onPressed: _mediaBusy
+                  ? null
+                  : () => unawaited(_restorePendingMedia()),
+              icon: const Icon(Icons.restore),
+              label: const Text('恢复未完成媒体'),
+            ),
+          if (_pendingMedia.isEmpty &&
+              mediaMessage.startsWith('媒体处理失败：') &&
+              !mediaMessage.contains('photo_save_result_uncertain'))
+            TextButton.icon(
+              style: actionStyle,
+              onPressed: _mediaBusy
+                  ? null
+                  : () => unawaited(_refreshPendingMedia()),
+              icon: const Icon(Icons.refresh),
+              label: const Text('重新检查恢复状态'),
+            ),
+          if (mediaMessage.contains('permission_denied'))
+            TextButton.icon(
+              style: actionStyle,
+              onPressed: _openSystemSettings,
+              icon: const Icon(Icons.settings_outlined),
+              label: const Text('打开系统设置'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopAction({
+    required String tooltip,
+    required IconData icon,
+    required VoidCallback? onPressed,
+  }) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      style: IconButton.styleFrom(
+        fixedSize: const Size(46, 46),
+        padding: EdgeInsets.zero,
+        backgroundColor: Colors.white.withValues(alpha: 0.12),
+        foregroundColor: Colors.white,
+        shape: const CircleBorder(),
+      ),
+      icon: Icon(icon, size: 21),
+    );
+  }
+
+  Widget _buildTopBar(CameraSessionState cameraState) {
+    final Color stateColor = switch (cameraState) {
+      CameraSessionState.ready => _accentColor,
+      CameraSessionState.recording => _recordingColor,
+      CameraSessionState.error => const Color(0xFFFFC56E),
+      _ => Colors.white70,
+    };
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(28),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          height: 60,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.44),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+          ),
+          child: Row(
+            children: <Widget>[
+              const SizedBox(width: 8),
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: _accentColor.withValues(alpha: 0.18),
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: const Icon(
+                  Icons.camera_alt_outlined,
+                  color: _accentColor,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Text(
+                      '水印相机',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: <Widget>[
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: stateColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: Text(
+                            _statusText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              _buildTopAction(
+                tooltip: '我的水印',
+                icon: Icons.photo_library_outlined,
+                onPressed:
+                    _mediaBusy ||
+                        cameraState == CameraSessionState.recording ||
+                        cameraState == CameraSessionState.processing
+                    ? null
+                    : _openGallery,
+              ),
+              const SizedBox(width: 4),
+              _buildTopAction(
+                tooltip: '水印设置',
+                icon: Icons.tune,
+                onPressed: _openSettings,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -648,40 +1063,14 @@ class _CameraScreenState extends State<CameraScreen> {
             else
               const ColoredBox(color: Colors.black),
             Positioned(
-              top: 0,
-              left: 12,
-              right: 12,
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      _statusText,
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '我的水印',
-                    color: Colors.white,
-                    onPressed:
-                        _mediaBusy ||
-                            cameraState == CameraSessionState.recording ||
-                            cameraState == CameraSessionState.processing
-                        ? null
-                        : _openGallery,
-                    icon: const Icon(Icons.photo_library_outlined),
-                  ),
-                  IconButton(
-                    tooltip: '水印设置',
-                    color: Colors.white,
-                    onPressed: _openSettings,
-                    icon: const Icon(Icons.tune),
-                  ),
-                ],
-              ),
+              top: 8,
+              left: 14,
+              right: 14,
+              child: _buildTopBar(cameraState),
             ),
             if (_visibleError case final String errorText)
               Positioned(
-                top: 54,
+                top: 78,
                 left: 16,
                 right: 16,
                 child: _StatusCard(
@@ -695,119 +1084,47 @@ class _CameraScreenState extends State<CameraScreen> {
                 ),
               ),
             Positioned(
-              left: 12,
-              right: 12,
-              bottom: 20,
+              left: 14,
+              right: 14,
+              bottom: 10,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  if (_locationText == null && _locationFailure == null)
-                    Text(
-                      _locationLoading ? '正在获取地点…' : '请填写地点后拍摄',
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: <Widget>[
-                      IconButton(
-                        tooltip: _cameraCoordinator.canSwitchCamera
-                            ? '切换前后摄像头'
-                            : '当前设备没有可切换的镜头',
-                        color: Colors.white,
-                        onPressed:
-                            canChangeMode && _cameraCoordinator.canSwitchCamera
-                            ? () => unawaited(_cameraCoordinator.switchCamera())
-                            : null,
-                        icon: const Icon(Icons.cameraswitch_outlined),
-                      ),
-                      _buildFlashControl(canChangeMode),
-                    ],
-                  ),
-                  SegmentedButton<CameraCaptureMode>(
-                    segments: const <ButtonSegment<CameraCaptureMode>>[
-                      ButtonSegment<CameraCaptureMode>(
-                        value: CameraCaptureMode.photo,
-                        label: Text('照片'),
-                        icon: Icon(Icons.photo_camera_outlined),
-                      ),
-                      ButtonSegment<CameraCaptureMode>(
-                        value: CameraCaptureMode.video,
-                        label: Text('视频'),
-                        icon: Icon(Icons.videocam_outlined),
-                      ),
-                    ],
-                    selected: <CameraCaptureMode>{
-                      _cameraCoordinator.captureMode,
-                    },
-                    onSelectionChanged: canChangeMode
-                        ? (Set<CameraCaptureMode> selected) {
-                            if (selected.length != 1) {
-                              throw StateError(
-                                'Exactly one camera capture mode must be selected.',
-                              );
-                            }
-                            unawaited(
-                              _cameraCoordinator.setCaptureMode(
-                                selected.single,
-                              ),
-                            );
-                          }
-                        : null,
-                  ),
-                  const SizedBox(height: 12),
-                  if (_mediaMessage case final String mediaMessage)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          Text(
-                            mediaMessage,
-                            textAlign: TextAlign.center,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white),
+                  _buildLocationIndicator(),
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(26),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                        decoration: BoxDecoration(
+                          color: _panelColor,
+                          borderRadius: BorderRadius.circular(26),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.16),
                           ),
-                          if (_pendingMedia.any(
-                            (PendingWatermarkMedia item) =>
-                                item.status != 'saving',
-                          ))
-                            TextButton.icon(
-                              onPressed: _mediaBusy
-                                  ? null
-                                  : () => unawaited(_restorePendingMedia()),
-                              icon: const Icon(Icons.restore),
-                              label: const Text('恢复未完成媒体'),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: <Widget>[
+                                _buildCameraSwitchControl(canChangeMode),
+                                _buildCaptureButton(cameraState),
+                                _buildFlashControl(canChangeMode),
+                              ],
                             ),
-                          if (_pendingMedia.isEmpty &&
-                              _mediaMessage?.startsWith('媒体处理失败：') == true &&
-                              !_mediaMessage!.contains(
-                                'photo_save_result_uncertain',
-                              ))
-                            TextButton.icon(
-                              onPressed: _mediaBusy
-                                  ? null
-                                  : () => unawaited(_refreshPendingMedia()),
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('重新检查恢复状态'),
-                            ),
-                          if (_mediaMessage!.contains('permission_denied'))
-                            TextButton.icon(
-                              onPressed: _openSystemSettings,
-                              icon: const Icon(Icons.settings_outlined),
-                              label: const Text('打开系统设置'),
-                            ),
-                        ],
+                            const SizedBox(height: 12),
+                            _buildCaptureModeControl(canChangeMode),
+                            if (_mediaMessage case final String mediaMessage)
+                              _buildMediaMessage(mediaMessage),
+                          ],
+                        ),
                       ),
                     ),
-                  _buildCaptureButton(cameraState),
-                  const SizedBox(height: 8),
-                  Text(
-                    _locationText ?? '地点不可用',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white70),
                   ),
                 ],
               ),

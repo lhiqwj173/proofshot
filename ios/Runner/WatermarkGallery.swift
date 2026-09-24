@@ -955,6 +955,7 @@ private final class WatermarkGalleryViewController: UIViewController,
   init(journal: WatermarkMediaJournal) {
     self.journal = journal
     let layout = UICollectionViewFlowLayout()
+    layout.scrollDirection = .vertical
     layout.minimumInteritemSpacing = 3
     layout.minimumLineSpacing = 3
     collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
@@ -998,6 +999,10 @@ private final class WatermarkGalleryViewController: UIViewController,
     view.addSubview(settingsButton)
 
     collectionView.backgroundColor = .systemBackground
+    collectionView.isScrollEnabled = true
+    collectionView.alwaysBounceVertical = true
+    collectionView.alwaysBounceHorizontal = false
+    collectionView.showsVerticalScrollIndicator = true
     collectionView.dataSource = self
     collectionView.delegate = self
     collectionView.register(
