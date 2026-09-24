@@ -561,7 +561,8 @@ final class WatermarkBridge {
       )
     }
 
-    let videoCodecs = videoTrack.formatDescriptions.map { description in
+    let videoFormatDescriptions = videoTrack.formatDescriptions as! [CMFormatDescription]
+    let videoCodecs: [FourCharCode] = videoFormatDescriptions.map { description in
       CMFormatDescriptionGetMediaSubType(description)
     }
     guard videoCodecs.contains(kCMVideoCodecType_H264) else {
@@ -569,7 +570,10 @@ final class WatermarkBridge {
     }
 
     let audioTracks = outputAsset.tracks(withMediaType: .audio)
-    let audioCodecs = audioTracks.flatMap(\.formatDescriptions).map { description in
+    let audioFormatDescriptions = audioTracks.flatMap {
+      $0.formatDescriptions as! [CMFormatDescription]
+    }
+    let audioCodecs: [FourCharCode] = audioFormatDescriptions.map { description in
       CMFormatDescriptionGetMediaSubType(description)
     }
     guard audioCodecs.contains(kAudioFormatMPEG4AAC) else {

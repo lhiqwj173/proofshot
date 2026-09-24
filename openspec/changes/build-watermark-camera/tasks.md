@@ -159,7 +159,7 @@ convergence_policy:
   - 修改：`codemagic.yaml`、必要时 `.gitignore`；保留 `ios-personal` 流程，移除每次生成 host，锁文件安装、无签名构建、非空 IPA 打包和 artifacts。
   - 约束：不能把无签名 IPA 宣称可直接装真机；不能提交签名凭证。
   - 验证：`flutter pub get --enforce-lockfile`、`dart format --output=none --set-exit-if-changed lib`、`flutter analyze`，Codemagic 工作流日志与非空 IPA；预期静态和编译全部通过。
-  - 本次验证：用户提供的 Codemagic 首次云构建已通过依赖解析，但 Swift 编译失败；本轮修复媒体记录初始化、PhotoKit 进度回调参数、CoreMedia 格式描述处理及有限图库的系统设置入口。`flutter pub get --enforce-lockfile`、Dart 格式检查、`flutter analyze` 和 OpenSpec 严格校验均通过；当前 Windows 环境无法运行 Xcode，需由推送触发的 Codemagic 构建确认 Swift 编译及非空 IPA；未运行 `flutter test`。
+  - 本次验证：用户先后提供两次 Codemagic 云构建日志，依赖解析均通过；第二次 Swift 编译显示 `AVAssetTrack.formatDescriptions` 元素为 `Any`，本轮已显式 fail-fast 转换为 `[CMFormatDescription]` 后读取 subtype。上一轮 `flutter pub get --enforce-lockfile`、Dart 格式检查、`flutter analyze` 和 OpenSpec 严格校验均通过；当前 Windows 环境无法运行 Xcode，需再次由 Codemagic 确认 Swift 编译及非空 IPA；未运行 `flutter test`。
 
 ## 用户真机验收矩阵（iPhone 11，用户执行）
 
