@@ -95,6 +95,28 @@ private struct WatermarkMediaRecord {
     return value
   }
 
+  init(
+    id: String,
+    kind: String,
+    capturedAt: String,
+    snapshot: [String: String],
+    sourcePath: String,
+    renderedPath: String?,
+    status: String,
+    localIdentifier: String?,
+    errorMessage: String?
+  ) {
+    self.id = id
+    self.kind = kind
+    self.capturedAt = capturedAt
+    self.snapshot = snapshot
+    self.sourcePath = sourcePath
+    self.renderedPath = renderedPath
+    self.status = status
+    self.localIdentifier = localIdentifier
+    self.errorMessage = errorMessage
+  }
+
   init(jsonValue: Any) throws {
     guard let value = jsonValue as? [String: Any],
           Set(value.keys) == Set([
@@ -880,7 +902,7 @@ private final class WatermarkMediaCell: UICollectionViewCell {
     options.deliveryMode = .opportunistic
     options.resizeMode = .fast
     options.isNetworkAccessAllowed = true
-    options.progressHandler = { [weak self] _, _, error, _ in
+    options.progressHandler = { [weak self] _, error, _, _ in
       guard error != nil else { return }
       DispatchQueue.main.async {
         guard self?.representedIdentifier == asset.localIdentifier else { return }
@@ -999,13 +1021,38 @@ private final class WatermarkGalleryViewController: UIViewController,
       collectionView.topAnchor.constraint(equalTo: filterControl.bottomAnchor, constant: 10),
       collectionView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
     ])
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(applicationDidBecomeActive),
+      name: UIApplication.didBecomeActiveNotification,
+      object: nil
+    )
     requestGalleryAccessIfNeeded()
   }
 
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
+    refreshAuthorizationStatus()
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(
+      self,
+      name: UIApplication.didBecomeActiveNotification,
+      object: nil
+    )
+  }
+
+  @objc private func applicationDidBecomeActive() {
+    refreshAuthorizationStatus()
+  }
+
+  private func refreshAuthorizationStatus() {
+    authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
     if authorizationStatus == .authorized || authorizationStatus == .limited {
       reloadFromIndex()
+    } else if authorizationStatus != .notDetermined {
+      showPermissionRequired()
     }
   }
 
@@ -1105,15 +1152,6 @@ private final class WatermarkGalleryViewController: UIViewController,
   }
 
   @objc private func openSystemSettings() {
-    if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited {
-      PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: self) { [weak self] _ in
-        DispatchQueue.main.async {
-          self?.authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-          self?.reloadFromIndex()
-        }
-      }
-      return
-    }
     guard let url = URL(string: UIApplication.openSettingsURLString) else {
       preconditionFailure("The iOS settings URL is invalid.")
     }
@@ -1296,7 +1334,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
     let options = PHVideoRequestOptions()
     options.deliveryMode = .automatic
     options.isNetworkAccessAllowed = true
-    options.progressHandler = { [weak self] _, _, error, _ in
+    options.progressHandler = { [weak self] _, error, _, _ in
       guard let error else { return }
       DispatchQueue.main.async {
         self?.statusLabel.text = "视频读取失败：\(error.localizedDescription)"
@@ -1385,7 +1423,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
     options.deliveryMode = .highQualityFormat
     options.resizeMode = .exact
     options.isNetworkAccessAllowed = true
-    options.progressHandler = { [weak self] _, _, error, _ in
+    options.progressHandler = { [weak self] _, error, _, _ in
       guard let error else { return }
       DispatchQueue.main.async {
         self?.statusLabel.text = "照片读取失败：\(error.localizedDescription)"
