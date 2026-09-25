@@ -828,7 +828,8 @@ private struct WatermarkGalleryEntry {
 private enum GalleryPalette {
   static let background = UIColor(white: 0.031, alpha: 1)
   static let surface = UIColor(white: 0.141, alpha: 1)
-  static let accent = UIColor(red: 0.952941, green: 0.831373, blue: 0.490196, alpha: 1)
+  static let selected = UIColor(white: 0.204, alpha: 1)
+  static let accent = UIColor.white
 }
 
 private final class WatermarkMediaCell: UICollectionViewCell {
@@ -1023,9 +1024,9 @@ private final class WatermarkGalleryViewController: UIViewController,
     updateNavigationActions()
 
     filterControl.selectedSegmentIndex = 0
-    filterControl.selectedSegmentTintColor = GalleryPalette.accent
+    filterControl.selectedSegmentTintColor = GalleryPalette.selected
     filterControl.backgroundColor = GalleryPalette.surface
-    filterControl.setTitleTextAttributes([.foregroundColor: UIColor(white: 0.08, alpha: 1)], for: .selected)
+    filterControl.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .selected)
     filterControl.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
     filterControl.addTarget(self, action: #selector(filterChanged), for: .valueChanged)
     filterControl.translatesAutoresizingMaskIntoConstraints = false

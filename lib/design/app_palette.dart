@@ -7,4 +7,8 @@ abstract final class AppPalette {
   static const Color accent = Color(0xFFFFFFFF);
   static const Color secondaryText = Color(0xFFAAAAAA);
   static const Color recording = Color(0xFFFF716B);
+  static const Color controlBar = Color(0x80000000);
+  static const Color translucentControl = Color(0x591C1C1E);
+  static const Color translucentPill = Color(0x8F1C1C1E);
+  static const Color previewScrim = Color(0x8C000000);
 }

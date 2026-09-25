@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import '../watermark/live_watermark_preview.dart';
 import '../watermark/watermark_snapshot.dart';
 import 'camera_coordinator.dart';
 import 'hardware_capture_bridge.dart';
+import 'zoom_control.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({required this.settings, super.key});
@@ -43,6 +45,8 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _settingsOpen = false;
   bool _galleryOpen = false;
   bool? _hardwareCaptureEnabled;
+  bool _zoomGestureActive = false;
+  double _zoomStartFactor = 1;
   WatermarkSnapshot? _recordingSnapshot;
   List<PendingWatermarkMedia> _pendingMedia = <PendingWatermarkMedia>[];
   RecentCaptureThumbnail? _recentThumbnail;
@@ -471,6 +475,73 @@ class _CameraScreenState extends State<CameraScreen> {
     await _cameraCoordinator.finishProcessing();
   }
 
+  bool get _canZoom =>
+      !_isShuttingDown &&
+      _cameraCoordinator.isBackCameraSelected &&
+      (_cameraCoordinator.state == CameraSessionState.ready ||
+          _cameraCoordinator.state == CameraSessionState.recording) &&
+      _cameraCoordinator.controller?.value.isInitialized == true;
+
+  void _handleZoomGestureStart(ScaleStartDetails details) {
+    if (!_canZoom) {
+      return;
+    }
+    _zoomStartFactor = _cameraCoordinator.zoomFactor;
+  }
+
+  void _handleZoomGestureUpdate(ScaleUpdateDetails details) {
+    if (!_canZoom || details.pointerCount < 2) {
+      return;
+    }
+    if (!_zoomGestureActive) {
+      setState(() => _zoomGestureActive = true);
+    }
+    _cameraCoordinator.setZoomFactor(_zoomStartFactor * details.scale);
+  }
+
+  void _handleZoomGestureEnd(ScaleEndDetails details) {
+    if (!_zoomGestureActive) {
+      return;
+    }
+    setState(() => _zoomGestureActive = false);
+    final CameraZoomStep? step = snapZoomStep(
+      _cameraCoordinator.zoomSteps,
+      _cameraCoordinator.zoomFactor,
+    );
+    if (step != null) {
+      _selectZoomStep(step);
+    }
+  }
+
+  void _selectZoomStep(CameraZoomStep step) {
+    if (_cameraCoordinator.state != CameraSessionState.ready) {
+      return;
+    }
+    unawaited(_applyZoomStep(step));
+  }
+
+  Future<void> _applyZoomStep(CameraZoomStep step) async {
+    try {
+      await _cameraCoordinator.applyZoomStep(step);
+    } on Object catch (error) {
+      _showMediaMessage('切换镜头失败：$error');
+    }
+  }
+
+  List<CameraZoomStep> _visibleZoomSteps() {
+    final List<CameraZoomStep> steps = _cameraCoordinator.zoomSteps;
+    if (_cameraCoordinator.state == CameraSessionState.ready) {
+      return steps;
+    }
+    final String? selectedName = _cameraCoordinator.selectedCamera?.name;
+    return steps
+        .where(
+          (CameraZoomStep step) =>
+              step.camera == null || step.camera?.name == selectedName,
+        )
+        .toList(growable: false);
+  }
+
   Future<void> _openGallery() async {
     _galleryOpen = true;
     _syncHardwareCapture();
@@ -622,7 +693,7 @@ class _CameraScreenState extends State<CameraScreen> {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: AppPalette.surface,
+        color: AppPalette.translucentPill,
         borderRadius: BorderRadius.circular(28),
       ),
       child: Row(
@@ -861,18 +932,18 @@ class _CameraScreenState extends State<CameraScreen> {
       children: <Widget>[
         const Spacer(),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
           decoration: BoxDecoration(
-            color: AppPalette.surface,
+            color: AppPalette.translucentPill,
             borderRadius: BorderRadius.circular(28),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               _buildFlashControl(cameraState == CameraSessionState.ready),
-              const SizedBox(width: 4),
+              const SizedBox(width: 2),
               _buildLocationControl(cameraState),
-              const SizedBox(width: 4),
+              const SizedBox(width: 2),
               _buildTopAction(
                 tooltip: '设置',
                 icon: Icons.more_horiz_rounded,
@@ -985,129 +1056,211 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
+  double _frameAspectRatio(
+    CameraController controller,
+    BoxConstraints constraints,
+  ) => constraints.maxWidth > constraints.maxHeight
+      ? controller.value.aspectRatio
+      : 1 / controller.value.aspectRatio;
+
+  Widget _buildPreviewBackdrop(CameraController controller) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double frameAspectRatio = _frameAspectRatio(
+          controller,
+          constraints,
+        );
+        return ClipRect(
+          child: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: constraints.maxWidth,
+                  height: constraints.maxWidth / frameAspectRatio,
+                  child: CameraPreview(controller),
+                ),
+              ),
+              const ColoredBox(color: AppPalette.previewScrim),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget? _buildWatermarkPreview(CameraSessionState cameraState) {
+    final String? locationText = _locationText;
+    if (locationText == null) {
+      return null;
+    }
+    return LiveWatermarkPreview(
+      locationText: locationText,
+      customText: widget.settings.customText,
+      frozenSnapshot: cameraState == CameraSessionState.recording
+          ? _recordingSnapshot
+          : null,
+    );
+  }
+
+  Widget _buildViewfinder(
+    CameraController? controller,
+    CameraSessionState cameraState,
+  ) {
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        if (controller != null && controller.value.isInitialized)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onScaleStart: _handleZoomGestureStart,
+            onScaleUpdate: _handleZoomGestureUpdate,
+            onScaleEnd: _handleZoomGestureEnd,
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                final double frameAspectRatio = _frameAspectRatio(
+                  controller,
+                  constraints,
+                );
+                final double frameWidth = math.min(
+                  constraints.maxWidth,
+                  constraints.maxHeight * frameAspectRatio,
+                );
+                return Align(
+                  alignment: Alignment.bottomCenter,
+                  child: SizedBox(
+                    width: frameWidth,
+                    height: frameWidth / frameAspectRatio,
+                    child: CameraPreview(
+                      controller,
+                      child: _buildWatermarkPreview(cameraState),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+              child: _buildTopBar(cameraState),
+            ),
+          ),
+        ),
+        Positioned.fill(
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 62, 16, 0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  if (_visibleError case final String errorText)
+                    _StatusCard(
+                      message: errorText,
+                      actionLabel: cameraState == CameraSessionState.error
+                          ? '重试相机'
+                          : _locationNeedsSystemSettings
+                          ? '系统设置'
+                          : '刷新定位',
+                      onAction: cameraState == CameraSessionState.error
+                          ? _retryCamera
+                          : _locationNeedsSystemSettings
+                          ? _openSystemSettings
+                          : _refreshLocation,
+                    ),
+                  if (_mediaMessage case final String mediaMessage)
+                    _buildMediaMessage(mediaMessage),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildControlPanel(CameraSessionState cameraState) {
+    final bool canChangeMode = cameraState == CameraSessionState.ready;
+    final List<CameraZoomStep> steps = _visibleZoomSteps();
+    return Container(
+      color: AppPalette.controlBar,
+      padding: EdgeInsets.fromLTRB(
+        24,
+        10,
+        24,
+        12 + MediaQuery.viewPaddingOf(context).bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (steps.isNotEmpty)
+            CameraZoomControl(
+              steps: steps,
+              factor: _cameraCoordinator.zoomFactor,
+              minimumFactor: _cameraCoordinator.minimumZoomFactor,
+              maximumFactor: _cameraCoordinator.maximumZoomFactor,
+              showDial: _zoomGestureActive,
+              onFactorChanged: _cameraCoordinator.setZoomFactor,
+              onStepSelected: _selectZoomStep,
+            ),
+          if (steps.isNotEmpty) const SizedBox(height: 10),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _buildGalleryControl(cameraState),
+                ),
+              ),
+              _buildCaptureButton(cameraState),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: _buildCameraSwitchControl(canChangeMode),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _buildCaptureModeControl(canChangeMode),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final CameraController? controller = _cameraCoordinator.controller;
     final CameraSessionState cameraState = _cameraCoordinator.state;
-    final bool canChangeMode = cameraState == CameraSessionState.ready;
 
     return Scaffold(
       backgroundColor: AppPalette.background,
-      body: SafeArea(
-        child: Column(
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-              child: _buildTopBar(cameraState),
-            ),
-            Expanded(
-              child: ColoredBox(
-                color: AppPalette.background,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: <Widget>[
-                    if (controller != null && controller.value.isInitialized)
-                      LayoutBuilder(
-                        builder:
-                            (BuildContext context, BoxConstraints constraints) {
-                              final bool landscape =
-                                  constraints.maxWidth > constraints.maxHeight;
-                              final double previewAspectRatio = landscape
-                                  ? controller.value.aspectRatio
-                                  : 1 / controller.value.aspectRatio;
-                              return ClipRect(
-                                child: SizedBox.expand(
-                                  child: FittedBox(
-                                    fit: BoxFit.cover,
-                                    child: SizedBox(
-                                      width: constraints.maxWidth,
-                                      height:
-                                          constraints.maxWidth /
-                                          previewAspectRatio,
-                                      child: Stack(
-                                        fit: StackFit.expand,
-                                        children: <Widget>[
-                                          CameraPreview(controller),
-                                          if (_locationText
-                                              case final String locationText)
-                                            LiveWatermarkPreview(
-                                              locationText: locationText,
-                                              customText:
-                                                  widget.settings.customText,
-                                              frozenSnapshot:
-                                                  cameraState ==
-                                                      CameraSessionState
-                                                          .recording
-                                                  ? _recordingSnapshot
-                                                  : null,
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                      ),
-                    if (_visibleError case final String errorText)
-                      Positioned(
-                        top: 16,
-                        left: 16,
-                        right: 16,
-                        child: _StatusCard(
-                          message: errorText,
-                          actionLabel: cameraState == CameraSessionState.error
-                              ? '重试相机'
-                              : _locationNeedsSystemSettings
-                              ? '系统设置'
-                              : '刷新定位',
-                          onAction: cameraState == CameraSessionState.error
-                              ? _retryCamera
-                              : _locationNeedsSystemSettings
-                              ? _openSystemSettings
-                              : _refreshLocation,
-                        ),
-                      ),
-                    if (_mediaMessage case final String mediaMessage)
-                      Positioned(
-                        top: _visibleError == null ? 16 : 114,
-                        left: 16,
-                        right: 16,
-                        child: _buildMediaMessage(mediaMessage),
-                      ),
-                  ],
+      body: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          if (controller != null && controller.value.isInitialized)
+            _buildPreviewBackdrop(controller),
+          Column(
+            children: <Widget>[
+              SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+                  child: _buildTopBar(cameraState),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(30, 24, 30, 18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: _buildGalleryControl(cameraState),
-                        ),
-                      ),
-                      _buildCaptureButton(cameraState),
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: _buildCameraSwitchControl(canChangeMode),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 22),
-                  _buildCaptureModeControl(canChangeMode),
-                ],
-              ),
-            ),
-          ],
-        ),
+              Expanded(child: _buildViewfinder(controller, cameraState)),
+              _buildControlPanel(cameraState),
+            ],
+          ),
+        ],
       ),
     );
   }
