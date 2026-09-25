@@ -33,7 +33,29 @@ class _ProofshotAppState extends State<ProofshotApp> {
       title: '水印相机',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFFC6F4D5),
+          brightness: Brightness.dark,
+          surface: const Color(0xFF111B1D),
+        ),
+        scaffoldBackgroundColor: const Color(0xFF0E1719),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF0E1719),
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFF1B292B),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide.none,
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 18,
+          ),
+        ),
         useMaterial3: true,
       ),
       home: FutureBuilder<WatermarkSettings>(

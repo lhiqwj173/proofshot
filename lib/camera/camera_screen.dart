@@ -23,9 +23,9 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen> {
-  static const Color _accentColor = Color(0xFF62D9D1);
-  static const Color _recordingColor = Color(0xFFFF5B62);
-  static const Color _panelColor = Color(0xE6101722);
+  static const Color _accentColor = Color(0xFFC6F4D5);
+  static const Color _recordingColor = Color(0xFFFF716B);
+  static const Color _panelColor = Color(0xEB101B1D);
 
   late final CameraCoordinator _cameraCoordinator;
   late final LocationService _locationService;
@@ -553,7 +553,7 @@ class _CameraScreenState extends State<CameraScreen> {
           width: 48,
           height: 48,
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: enabled ? 0.12 : 0.05),
+            color: Colors.white.withValues(alpha: enabled ? 0.09 : 0.04),
             shape: BoxShape.circle,
             border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           ),
@@ -591,7 +591,7 @@ class _CameraScreenState extends State<CameraScreen> {
             foregroundColor: canSwitch ? Colors.white : Colors.white38,
             shape: const CircleBorder(),
           ),
-          icon: const Icon(Icons.cameraswitch_outlined, size: 22),
+          icon: const Icon(Icons.flip_camera_ios_outlined, size: 22),
         ),
         const SizedBox(height: 5),
         Text(
@@ -646,7 +646,7 @@ class _CameraScreenState extends State<CameraScreen> {
         children: <Widget>[
           _buildCaptureModeOption(
             mode: CameraCaptureMode.photo,
-            icon: Icons.photo_camera_outlined,
+            icon: Icons.photo_outlined,
             label: '照片',
             canChangeMode: canChangeMode,
           ),
@@ -684,13 +684,9 @@ class _CameraScreenState extends State<CameraScreen> {
               duration: const Duration(milliseconds: 160),
               height: 44,
               decoration: BoxDecoration(
-                color: selected
-                    ? _accentColor.withValues(alpha: 0.2)
-                    : Colors.transparent,
+                color: selected ? _accentColor : Colors.transparent,
                 borderRadius: BorderRadius.circular(14),
-                border: selected
-                    ? Border.all(color: _accentColor.withValues(alpha: 0.38))
-                    : null,
+                border: selected ? Border.all(color: _accentColor) : null,
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -698,13 +694,15 @@ class _CameraScreenState extends State<CameraScreen> {
                   Icon(
                     icon,
                     size: 19,
-                    color: selected ? _accentColor : Colors.white70,
+                    color: selected ? const Color(0xFF10201B) : Colors.white70,
                   ),
                   const SizedBox(width: 7),
                   Text(
                     label,
                     style: TextStyle(
-                      color: selected ? Colors.white : Colors.white70,
+                      color: selected
+                          ? const Color(0xFF10201B)
+                          : Colors.white70,
                       fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                     ),
                   ),
@@ -751,11 +749,7 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
             child: SizedBox.square(dimension: 20),
           )
-        : const Icon(
-            Icons.camera_alt_rounded,
-            size: 28,
-            color: Color(0xFF17202B),
-          );
+        : const SizedBox.shrink();
     return Semantics(
       button: true,
       enabled: onPressed != null,
@@ -859,7 +853,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 onPressed: _openSettings,
                 visualDensity: VisualDensity.compact,
                 color: Colors.white70,
-                icon: const Icon(Icons.edit_location_alt_outlined, size: 20),
+                icon: const Icon(Icons.edit_outlined, size: 19),
               ),
             ],
           ),
@@ -930,7 +924,7 @@ class _CameraScreenState extends State<CameraScreen> {
       style: IconButton.styleFrom(
         fixedSize: const Size(46, 46),
         padding: EdgeInsets.zero,
-        backgroundColor: Colors.white.withValues(alpha: 0.12),
+        backgroundColor: Colors.white.withValues(alpha: 0.09),
         foregroundColor: Colors.white,
         shape: const CircleBorder(),
       ),
@@ -946,15 +940,15 @@ class _CameraScreenState extends State<CameraScreen> {
       _ => Colors.white70,
     };
     return ClipRRect(
-      borderRadius: BorderRadius.circular(28),
+      borderRadius: BorderRadius.circular(20),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: Container(
-          height: 60,
+          height: 62,
           padding: const EdgeInsets.symmetric(horizontal: 8),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.44),
-            borderRadius: BorderRadius.circular(28),
+            color: _panelColor,
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
           ),
           child: Row(
@@ -969,7 +963,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 ),
                 alignment: Alignment.center,
                 child: const Icon(
-                  Icons.camera_alt_outlined,
+                  Icons.center_focus_strong_outlined,
                   color: _accentColor,
                   size: 18,
                 ),
@@ -1018,7 +1012,7 @@ class _CameraScreenState extends State<CameraScreen> {
               ),
               _buildTopAction(
                 tooltip: '我的水印',
-                icon: Icons.photo_library_outlined,
+                icon: Icons.grid_view_rounded,
                 onPressed:
                     _mediaBusy ||
                         cameraState == CameraSessionState.recording ||
@@ -1029,7 +1023,7 @@ class _CameraScreenState extends State<CameraScreen> {
               const SizedBox(width: 4),
               _buildTopAction(
                 tooltip: '水印设置',
-                icon: Icons.tune,
+                icon: Icons.tune_rounded,
                 onPressed: _openSettings,
               ),
             ],

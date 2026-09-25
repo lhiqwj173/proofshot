@@ -162,37 +162,82 @@ class _WatermarkSettingsPageState extends State<WatermarkSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final Color accent = Theme.of(context).colorScheme.primary;
     return Scaffold(
-      appBar: AppBar(title: const Text('水印设置')),
+      appBar: AppBar(title: const Text('水印设置'), centerTitle: false),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
         children: <Widget>[
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1B292B),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.verified_outlined, color: accent, size: 28),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Text(
+                    '让每张照片都有清晰的时间与地点记录',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 30),
+          Text(
+            '拍摄信息',
+            style: TextStyle(
+              color: accent,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
           TextField(
             controller: _locationController,
             maxLines: 1,
             maxLength: 40,
             maxLengthEnforcement: MaxLengthEnforcement.enforced,
             decoration: const InputDecoration(
-              labelText: '手动地点',
+              labelText: '拍摄地点',
+              prefixIcon: Icon(Icons.location_on_outlined),
               helperText: '填写后优先使用；清空后恢复自动定位',
-              border: OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 28),
+          Text(
+            '个性内容',
+            style: TextStyle(
+              color: accent,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
           TextField(
             controller: _customTextController,
             maxLines: 1,
             maxLength: 30,
             maxLengthEnforcement: MaxLengthEnforcement.enforced,
             decoration: const InputDecoration(
-              labelText: '自定义水印',
+              labelText: '自定义水印文字',
+              prefixIcon: Icon(Icons.edit_note_outlined),
               helperText: '可留空，最多 30 个字符',
-              border: OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 28),
           FilledButton(
             onPressed: _isSaving ? null : _save,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(54),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
             child: Text(_isSaving ? '保存中…' : '保存设置'),
           ),
         ],

@@ -781,6 +781,7 @@ final class WatermarkGalleryBridge {
       }
       let gallery = WatermarkGalleryViewController(journal: self.journal)
       let navigationController = UINavigationController(rootViewController: gallery)
+      navigationController.overrideUserInterfaceStyle = .dark
       navigationController.modalPresentationStyle = .fullScreen
       presenter.present(navigationController, animated: true) {
         result(nil)
@@ -831,6 +832,7 @@ private final class WatermarkMediaCell: UICollectionViewCell {
   private let typeLabel = UILabel()
   private let errorLabel = UILabel()
   private let progressView = UIActivityIndicatorView(style: .medium)
+  private let selectionMark = UIImageView()
   private var imageRequestID: PHImageRequestID?
   private var representedIdentifier: String?
 
@@ -861,6 +863,12 @@ private final class WatermarkMediaCell: UICollectionViewCell {
     progressView.color = .white
     progressView.translatesAutoresizingMaskIntoConstraints = false
     contentView.addSubview(progressView)
+    selectionMark.tintColor = UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1)
+    selectionMark.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+    selectionMark.layer.cornerRadius = 15
+    selectionMark.contentMode = .center
+    selectionMark.translatesAutoresizingMaskIntoConstraints = false
+    contentView.addSubview(selectionMark)
     NSLayoutConstraint.activate([
       imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
       imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
@@ -874,6 +882,10 @@ private final class WatermarkMediaCell: UICollectionViewCell {
       errorLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
       progressView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
       progressView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+      selectionMark.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 7),
+      selectionMark.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -7),
+      selectionMark.widthAnchor.constraint(equalToConstant: 30),
+      selectionMark.heightAnchor.constraint(equalToConstant: 30),
     ])
   }
 
@@ -892,6 +904,14 @@ private final class WatermarkMediaCell: UICollectionViewCell {
     typeLabel.text = nil
     errorLabel.isHidden = true
     progressView.stopAnimating()
+    selectionMark.isHidden = true
+  }
+
+  func setSelectionMode(_ enabled: Bool, selected: Bool) {
+    selectionMark.isHidden = !enabled
+    selectionMark.image = UIImage(systemName: selected ? "checkmark.circle.fill" : "circle")
+    contentView.layer.borderWidth = selected ? 3 : 0
+    contentView.layer.borderColor = UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1).cgColor
   }
 
   func configure(with asset: PHAsset) {
@@ -946,11 +966,18 @@ private final class WatermarkGalleryViewController: UIViewController,
   private let filterControl = UISegmentedControl(items: ["全部", "照片", "视频"])
   private let statusLabel = UILabel()
   private let settingsButton = UIButton(type: .system)
+  private let selectionBar = UIView()
+  private let selectAllButton = UIButton(type: .system)
+  private let deleteButton = UIButton(type: .system)
+  private var selectionBarHeight: NSLayoutConstraint!
   private let collectionView: UICollectionView
   private var entries: [WatermarkGalleryEntry] = []
   private var filteredEntries: [WatermarkGalleryEntry] = []
   private var authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
   private var hiddenLimitedItemCount = 0
+  private var isSelecting = false
+  private var selectedIdentifiers = Set<String>()
+  private var isDeleting = false
 
   init(journal: WatermarkMediaJournal) {
     self.journal = journal
@@ -969,36 +996,41 @@ private final class WatermarkGalleryViewController: UIViewController,
   override func viewDidLoad() {
     super.viewDidLoad()
     title = "我的水印"
-    view.backgroundColor = .systemBackground
+    overrideUserInterfaceStyle = .dark
+    view.backgroundColor = UIColor(red: 0.055, green: 0.075, blue: 0.085, alpha: 1)
+    navigationController?.navigationBar.tintColor = UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1)
+    navigationController?.navigationBar.titleTextAttributes = [.foregroundColor: UIColor.white]
+    navigationController?.navigationBar.barTintColor = view.backgroundColor
     navigationItem.leftBarButtonItem = UIBarButtonItem(
       barButtonSystemItem: .close,
       target: self,
       action: #selector(closeGallery)
     )
-    navigationItem.rightBarButtonItem = UIBarButtonItem(
-      barButtonSystemItem: .refresh,
-      target: self,
-      action: #selector(refreshGallery)
-    )
+    updateNavigationActions()
 
     filterControl.selectedSegmentIndex = 0
+    filterControl.selectedSegmentTintColor = UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1)
+    filterControl.backgroundColor = UIColor(white: 0.18, alpha: 1)
+    filterControl.setTitleTextAttributes([.foregroundColor: UIColor(white: 0.08, alpha: 1)], for: .selected)
+    filterControl.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
     filterControl.addTarget(self, action: #selector(filterChanged), for: .valueChanged)
     filterControl.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(filterControl)
 
     statusLabel.numberOfLines = 0
     statusLabel.textAlignment = .center
-    statusLabel.textColor = .secondaryLabel
+    statusLabel.textColor = .lightGray
     statusLabel.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(statusLabel)
 
     settingsButton.setTitle("打开系统设置", for: .normal)
+    settingsButton.tintColor = UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1)
     settingsButton.addTarget(self, action: #selector(openSystemSettings), for: .touchUpInside)
     settingsButton.translatesAutoresizingMaskIntoConstraints = false
     settingsButton.isHidden = true
     view.addSubview(settingsButton)
 
-    collectionView.backgroundColor = .systemBackground
+    collectionView.backgroundColor = view.backgroundColor
     collectionView.isScrollEnabled = true
     collectionView.alwaysBounceVertical = true
     collectionView.alwaysBounceHorizontal = false
@@ -1011,7 +1043,27 @@ private final class WatermarkGalleryViewController: UIViewController,
     )
     collectionView.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(collectionView)
+    view.bringSubviewToFront(statusLabel)
+    view.bringSubviewToFront(settingsButton)
+    let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+    collectionView.addGestureRecognizer(longPress)
 
+    selectionBar.backgroundColor = UIColor(red: 0.09, green: 0.12, blue: 0.13, alpha: 1)
+    selectionBar.translatesAutoresizingMaskIntoConstraints = false
+    selectionBar.isHidden = true
+    view.addSubview(selectionBar)
+    selectAllButton.setTitle("全选", for: .normal)
+    selectAllButton.setTitleColor(UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1), for: .normal)
+    selectAllButton.addTarget(self, action: #selector(toggleSelectAll), for: .touchUpInside)
+    selectAllButton.translatesAutoresizingMaskIntoConstraints = false
+    selectionBar.addSubview(selectAllButton)
+    deleteButton.setTitle("删除", for: .normal)
+    deleteButton.setTitleColor(UIColor(red: 1, green: 0.55, blue: 0.53, alpha: 1), for: .normal)
+    deleteButton.addTarget(self, action: #selector(confirmDeleteSelection), for: .touchUpInside)
+    deleteButton.translatesAutoresizingMaskIntoConstraints = false
+    selectionBar.addSubview(deleteButton)
+
+    selectionBarHeight = selectionBar.heightAnchor.constraint(equalToConstant: 0)
     NSLayoutConstraint.activate([
       filterControl.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
       filterControl.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
@@ -1024,7 +1076,15 @@ private final class WatermarkGalleryViewController: UIViewController,
       collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       collectionView.topAnchor.constraint(equalTo: filterControl.bottomAnchor, constant: 10),
-      collectionView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+      collectionView.bottomAnchor.constraint(equalTo: selectionBar.topAnchor),
+      selectionBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      selectionBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      selectionBar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+      selectionBarHeight,
+      selectAllButton.leadingAnchor.constraint(equalTo: selectionBar.leadingAnchor, constant: 20),
+      selectAllButton.centerYAnchor.constraint(equalTo: selectionBar.centerYAnchor),
+      deleteButton.trailingAnchor.constraint(equalTo: selectionBar.trailingAnchor, constant: -20),
+      deleteButton.centerYAnchor.constraint(equalTo: selectionBar.centerYAnchor),
     ])
     NotificationCenter.default.addObserver(
       self,
@@ -1077,7 +1137,9 @@ private final class WatermarkGalleryViewController: UIViewController,
     else {
       preconditionFailure("The gallery requested an invalid collection item.")
     }
-    cell.configure(with: filteredEntries[indexPath.item].asset)
+    let entry = filteredEntries[indexPath.item]
+    cell.configure(with: entry.asset)
+    cell.setSelectionMode(isSelecting, selected: selectedIdentifiers.contains(entry.item.id))
     return cell
   }
 
@@ -1087,6 +1149,15 @@ private final class WatermarkGalleryViewController: UIViewController,
   ) {
     guard indexPath.item < filteredEntries.count else {
       preconditionFailure("The selected gallery item is out of range.")
+    }
+    if isSelecting {
+      let identifier = filteredEntries[indexPath.item].item.id
+      if !selectedIdentifiers.insert(identifier).inserted {
+        selectedIdentifiers.remove(identifier)
+      }
+      collectionView.reloadItems(at: [indexPath])
+      updateSelectionActions()
+      return
     }
     let detail = WatermarkMediaPagerViewController(
       journal: journal,
@@ -1109,6 +1180,140 @@ private final class WatermarkGalleryViewController: UIViewController,
 
   @objc private func closeGallery() {
     dismiss(animated: true)
+  }
+
+  private func updateNavigationActions() {
+    if isSelecting {
+      navigationItem.leftBarButtonItem = UIBarButtonItem(
+        title: "取消", style: .plain, target: self, action: #selector(endSelection)
+      )
+      navigationItem.rightBarButtonItems = nil
+      updateSelectionActions()
+    } else {
+      navigationItem.leftBarButtonItem = UIBarButtonItem(
+        barButtonSystemItem: .close, target: self, action: #selector(closeGallery)
+      )
+      navigationItem.rightBarButtonItems = [
+        UIBarButtonItem(title: "选择", style: .plain, target: self, action: #selector(beginSelection)),
+        UIBarButtonItem(barButtonSystemItem: .refresh, target: self, action: #selector(refreshGallery)),
+      ]
+      if hiddenLimitedItemCount > 0 {
+        navigationItem.rightBarButtonItems?.append(
+          UIBarButtonItem(title: "权限", style: .plain, target: self, action: #selector(openSystemSettings))
+        )
+      }
+      title = "我的水印"
+    }
+  }
+
+  private func updateSelectionActions() {
+    title = "已选择 \(selectedIdentifiers.count) 项"
+    let visibleIdentifiers = Set(filteredEntries.map { $0.item.id })
+    selectAllButton.setTitle(
+      !visibleIdentifiers.isEmpty && visibleIdentifiers.isSubset(of: selectedIdentifiers)
+        ? "取消全选" : "全选", for: .normal
+    )
+    selectAllButton.isEnabled = !filteredEntries.isEmpty && !isDeleting
+    deleteButton.isEnabled = !selectedIdentifiers.isEmpty && !isDeleting
+    deleteButton.alpha = deleteButton.isEnabled ? 1 : 0.4
+  }
+
+  @objc private func beginSelection() {
+    guard !isDeleting else { return }
+    isSelecting = true
+    selectionBar.isHidden = false
+    selectionBarHeight.constant = 56
+    updateNavigationActions()
+    collectionView.reloadData()
+  }
+
+  @objc private func endSelection() {
+    guard !isDeleting else { return }
+    isSelecting = false
+    selectedIdentifiers.removeAll()
+    selectionBar.isHidden = true
+    selectionBarHeight.constant = 0
+    updateNavigationActions()
+    collectionView.reloadData()
+  }
+
+  @objc private func toggleSelectAll() {
+    let visibleIdentifiers = Set(filteredEntries.map { $0.item.id })
+    if visibleIdentifiers.isSubset(of: selectedIdentifiers) {
+      selectedIdentifiers.subtract(visibleIdentifiers)
+    } else {
+      selectedIdentifiers.formUnion(visibleIdentifiers)
+    }
+    collectionView.reloadData()
+    updateSelectionActions()
+  }
+
+  @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+    guard gesture.state == .began, !isDeleting,
+          let indexPath = collectionView.indexPathForItem(at: gesture.location(in: collectionView))
+    else { return }
+    if !isSelecting { beginSelection() }
+    let identifier = filteredEntries[indexPath.item].item.id
+    selectedIdentifiers.insert(identifier)
+    collectionView.reloadItems(at: [indexPath])
+    updateSelectionActions()
+  }
+
+  @objc private func confirmDeleteSelection() {
+    guard !selectedIdentifiers.isEmpty, !isDeleting else { return }
+    let count = selectedIdentifiers.count
+    let confirmation = UIAlertController(
+      title: "删除 \(count) 项水印成品？",
+      message: "将从系统照片删除所选照片和视频；若启用了 iCloud 照片，删除也可能同步到其他设备。",
+      preferredStyle: .alert
+    )
+    confirmation.addAction(UIAlertAction(title: "取消", style: .cancel))
+    confirmation.addAction(UIAlertAction(title: "删除", style: .destructive) { [weak self] _ in
+      self?.deleteSelection()
+    })
+    present(confirmation, animated: true)
+  }
+
+  private func deleteSelection() {
+    let identifiers = Array(selectedIdentifiers)
+    let fetched = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+    guard fetched.count == identifiers.count else {
+      statusLabel.text = "所选项目有变化，请刷新图库后重试。"
+      return
+    }
+    isDeleting = true
+    updateSelectionActions()
+    PHPhotoLibrary.shared().performChanges {
+      PHAssetChangeRequest.deleteAssets(fetched)
+    } completionHandler: { [weak self] succeeded, error in
+      DispatchQueue.main.async {
+        guard let self else { return }
+        self.isDeleting = false
+        guard succeeded else {
+          self.statusLabel.text = "删除失败：\(error?.localizedDescription ?? "系统未完成删除。")"
+          self.updateSelectionActions()
+          return
+        }
+        let remaining = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+        guard remaining.count == 0 else {
+          self.statusLabel.text = "系统已处理删除请求，但无法确认所有项目均已删除；索引仍保留。"
+          self.updateSelectionActions()
+          return
+        }
+        do {
+          for identifier in identifiers {
+            try self.journal.removeFromIndex(id: identifier)
+          }
+          self.selectedIdentifiers.removeAll()
+          self.reloadFromIndex()
+          self.endSelection()
+        } catch {
+          self.reloadFromIndex()
+          self.statusLabel.text = "系统照片已删除，索引更新失败：\(error.localizedDescription)"
+          self.updateSelectionActions()
+        }
+      }
+    }
   }
 
   @objc private func refreshGallery() {
@@ -1149,6 +1354,8 @@ private final class WatermarkGalleryViewController: UIViewController,
   }
 
   private func showPermissionRequired() {
+    selectedIdentifiers.removeAll()
+    if isSelecting { endSelection() }
     statusLabel.text = "需要允许水印相机读取照片，才能浏览已保存的水印成品。有限访问时，系统可能暂时隐藏部分项目。"
     collectionView.isHidden = true
     settingsButton.setTitle("打开系统设置", for: .normal)
@@ -1186,10 +1393,11 @@ private final class WatermarkGalleryViewController: UIViewController,
         : 0
       if hiddenLimitedItemCount > 0 {
         settingsButton.setTitle("管理有限照片访问", for: .normal)
-        settingsButton.isHidden = false
+        settingsButton.isHidden = !entries.isEmpty
       }
       collectionView.isHidden = false
       applyFilter()
+      if !isSelecting { updateNavigationActions() }
     } catch {
       collectionView.isHidden = true
       statusLabel.text = "图库读取失败：\(error.localizedDescription)"
@@ -1208,7 +1416,9 @@ private final class WatermarkGalleryViewController: UIViewController,
       preconditionFailure("The gallery filter index is invalid.")
     }
     collectionView.reloadData()
-    if hiddenLimitedItemCount > 0 {
+    selectedIdentifiers.formIntersection(Set(entries.map { $0.item.id }))
+    if isSelecting { updateSelectionActions() }
+    if hiddenLimitedItemCount > 0 && filteredEntries.isEmpty {
       statusLabel.text = "有限照片访问隐藏了部分已登记项目。请在系统照片权限中扩大访问范围；索引已保留。"
     } else if filteredEntries.isEmpty {
       if authorizationStatus == .limited && entries.isEmpty {
