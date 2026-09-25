@@ -11,6 +11,7 @@ class WatermarkSettings extends ChangeNotifier {
   WatermarkSettings._({
     required this._preferences,
     required this._manualLocation,
+    required this._automaticLocation,
     required this._customText,
   });
 
@@ -18,10 +19,18 @@ class WatermarkSettings extends ChangeNotifier {
 
   final SharedPreferences _preferences;
   String _manualLocation;
+  String _automaticLocation;
   String _customText;
 
   String get manualLocation => _manualLocation;
+  String get automaticLocation => _automaticLocation;
   String get customText => _customText;
+  String? get activeLocation {
+    final String location = _manualLocation.isNotEmpty
+        ? _manualLocation
+        : _automaticLocation;
+    return location.isEmpty ? null : location;
+  }
 
   static Future<WatermarkSettings> load() async {
     final SharedPreferences preferences = await SharedPreferences.getInstance();
@@ -30,6 +39,7 @@ class WatermarkSettings extends ChangeNotifier {
       return WatermarkSettings._(
         preferences: preferences,
         manualLocation: '',
+        automaticLocation: '',
         customText: '',
       );
     }
@@ -40,7 +50,9 @@ class WatermarkSettings extends ChangeNotifier {
         'Stored watermark settings must be a JSON object.',
       );
     }
-    if (decodedValue.length != 3 || decodedValue['schemaVersion'] != 1) {
+    final Object? schemaVersion = decodedValue['schemaVersion'];
+    if ((schemaVersion != 1 || decodedValue.length != 3) &&
+        (schemaVersion != 2 || decodedValue.length != 4)) {
       throw const FormatException(
         'Stored watermark settings have an unsupported schema.',
       );
@@ -48,7 +60,12 @@ class WatermarkSettings extends ChangeNotifier {
 
     final Object? manualLocation = decodedValue['manualLocation'];
     final Object? customText = decodedValue['customText'];
-    if (manualLocation is! String || customText is! String) {
+    final Object? automaticLocation = schemaVersion == 2
+        ? decodedValue['automaticLocation']
+        : '';
+    if (manualLocation is! String ||
+        automaticLocation is! String ||
+        customText is! String) {
       throw const FormatException(
         'Stored watermark settings contain invalid field types.',
       );
@@ -56,6 +73,11 @@ class WatermarkSettings extends ChangeNotifier {
     _validateText(
       manualLocation.trim(),
       fieldName: 'manualLocation',
+      maximumGraphemes: 40,
+    );
+    _validateText(
+      automaticLocation.trim(),
+      fieldName: 'automaticLocation',
       maximumGraphemes: 40,
     );
     _validateText(
@@ -67,6 +89,7 @@ class WatermarkSettings extends ChangeNotifier {
     return WatermarkSettings._(
       preferences: preferences,
       manualLocation: manualLocation.trim(),
+      automaticLocation: automaticLocation.trim(),
       customText: customText.trim(),
     );
   }
@@ -93,10 +116,47 @@ class WatermarkSettings extends ChangeNotifier {
       return;
     }
 
+    await _persist(
+      manualLocation: normalizedLocation,
+      automaticLocation: _automaticLocation,
+      customText: normalizedCustomText,
+    );
+  }
+
+  Future<void> useAutomaticLocation(String location) async {
+    final String normalizedLocation = location.trim();
+    _validateText(
+      normalizedLocation,
+      fieldName: 'automaticLocation',
+      maximumGraphemes: 40,
+    );
+    if (normalizedLocation.isEmpty) {
+      throw ArgumentError.value(
+        location,
+        'location',
+        'The refreshed location must be non-empty.',
+      );
+    }
+    if (_manualLocation.isEmpty && _automaticLocation == normalizedLocation) {
+      return;
+    }
+    await _persist(
+      manualLocation: '',
+      automaticLocation: normalizedLocation,
+      customText: _customText,
+    );
+  }
+
+  Future<void> _persist({
+    required String manualLocation,
+    required String automaticLocation,
+    required String customText,
+  }) async {
     final String encodedValue = jsonEncode(<String, Object>{
-      'schemaVersion': 1,
-      'manualLocation': normalizedLocation,
-      'customText': normalizedCustomText,
+      'schemaVersion': 2,
+      'manualLocation': manualLocation,
+      'automaticLocation': automaticLocation,
+      'customText': customText,
     });
     final bool persisted = await _preferences.setString(
       _storageKey,
@@ -106,8 +166,9 @@ class WatermarkSettings extends ChangeNotifier {
       throw StateError('Failed to persist watermark settings.');
     }
 
-    _manualLocation = normalizedLocation;
-    _customText = normalizedCustomText;
+    _manualLocation = manualLocation;
+    _automaticLocation = automaticLocation;
+    _customText = customText;
     notifyListeners();
   }
 }
@@ -187,14 +248,14 @@ class _WatermarkSettingsPageState extends State<WatermarkSettingsPage> {
                     maxLength: 40,
                     maxLengthEnforcement: MaxLengthEnforcement.enforced,
                     decoration: const InputDecoration(
-                      hintText: '留空则自动定位',
+                      hintText: '留空则沿用上次定位',
                       prefixIcon: Icon(Icons.location_on_outlined),
                       counterText: '',
                     ),
                   ),
                   const SizedBox(height: 10),
                   const Text(
-                    '仅用于成片水印，不显示在取景画面。',
+                    '点取景页右上角的定位按钮才会刷新。地点会实时显示在取景画面，并写入照片或视频。',
                     style: TextStyle(
                       color: AppPalette.secondaryText,
                       fontSize: 13,

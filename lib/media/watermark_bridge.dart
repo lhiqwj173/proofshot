@@ -2,6 +2,13 @@ import 'package:flutter/services.dart';
 
 import '../watermark/watermark_snapshot.dart';
 
+class RecentCaptureThumbnail {
+  const RecentCaptureThumbnail({required this.path, required this.kind});
+
+  final String path;
+  final String kind;
+}
+
 class WatermarkBridge {
   static const MethodChannel _channel = MethodChannel('proofshot/watermark');
 
@@ -25,6 +32,46 @@ class WatermarkBridge {
       sourcePath: sourcePath,
       snapshot: snapshot,
     );
+  }
+
+  Future<RecentCaptureThumbnail?> recentThumbnail() async {
+    final Map<String, Object?>? response = await _channel
+        .invokeMapMethod<String, Object?>('recentThumbnail');
+    if (response == null) {
+      return null;
+    }
+    return _parseRecentThumbnail(response);
+  }
+
+  Future<RecentCaptureThumbnail> updateRecentThumbnail({
+    required String sourcePath,
+    required String kind,
+  }) async {
+    _validateSourcePath(sourcePath);
+    if (kind != 'photo' && kind != 'video') {
+      throw ArgumentError.value(
+        kind,
+        'kind',
+        'Media kind must be photo or video.',
+      );
+    }
+    final Map<String, Object?>? response = await _channel
+        .invokeMapMethod<String, Object?>(
+          'updateRecentThumbnail',
+          <String, Object?>{'sourcePath': sourcePath, 'kind': kind},
+        );
+    if (response == null) {
+      throw const FormatException(
+        'The thumbnail renderer returned no thumbnail details.',
+      );
+    }
+    final RecentCaptureThumbnail thumbnail = _parseRecentThumbnail(response);
+    if (thumbnail.kind != kind) {
+      throw const FormatException(
+        'The thumbnail renderer returned the wrong media kind.',
+      );
+    }
+    return thumbnail;
   }
 
   Future<String> _render({
@@ -64,6 +111,29 @@ class WatermarkBridge {
       );
     }
     return renderedPath;
+  }
+
+  RecentCaptureThumbnail _parseRecentThumbnail(Map<String, Object?> value) {
+    if (value.length != 2 ||
+        value['thumbnailPath'] is! String ||
+        value['kind'] is! String) {
+      throw const FormatException(
+        'The native thumbnail renderer returned an invalid response map.',
+      );
+    }
+    final String path = value['thumbnailPath']! as String;
+    final String kind = value['kind']! as String;
+    if (!path.startsWith('/') || !path.endsWith('.jpg')) {
+      throw const FormatException(
+        'The native thumbnail renderer returned an invalid thumbnail path.',
+      );
+    }
+    if (kind != 'photo' && kind != 'video') {
+      throw const FormatException(
+        'The native thumbnail renderer returned an invalid media kind.',
+      );
+    }
+    return RecentCaptureThumbnail(path: path, kind: kind);
   }
 
   void _validateSourcePath(String sourcePath) {

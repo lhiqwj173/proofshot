@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../location/location_service.dart';
 import '../media/watermark_bridge.dart';
 import '../media/watermark_gallery_bridge.dart';
 import '../settings/watermark_settings.dart';
+import '../watermark/live_watermark_preview.dart';
 import '../watermark/watermark_snapshot.dart';
 import 'camera_coordinator.dart';
 import 'hardware_capture_bridge.dart';
@@ -34,8 +36,7 @@ class _CameraScreenState extends State<CameraScreen> {
   String? _locationText;
   LocationUnavailableException? _locationFailure;
   bool _locationLoading = false;
-  bool _locationAttempted = false;
-  int _lastLocationGeneration = -1;
+  int _thumbnailGeneration = 0;
   bool _isShuttingDown = false;
   bool _mediaBusy = false;
   bool _handlingInterruptedRecording = false;
@@ -44,6 +45,8 @@ class _CameraScreenState extends State<CameraScreen> {
   bool? _hardwareCaptureEnabled;
   WatermarkSnapshot? _recordingSnapshot;
   List<PendingWatermarkMedia> _pendingMedia = <PendingWatermarkMedia>[];
+  RecentCaptureThumbnail? _recentThumbnail;
+  Uint8List? _recentThumbnailBytes;
   String? _mediaMessage;
 
   @override
@@ -51,13 +54,15 @@ class _CameraScreenState extends State<CameraScreen> {
     super.initState();
     _cameraCoordinator = CameraCoordinator()
       ..addListener(_handleCameraStateChanged);
-    _locationService = LocationService(settings: widget.settings);
+    _locationService = LocationService();
+    _locationText = widget.settings.activeLocation;
     _watermarkBridge = WatermarkBridge();
     _galleryBridge = WatermarkGalleryBridge();
     _hardwareCaptureBridge = HardwareCaptureBridge(_capturePhoto);
     widget.settings.addListener(_handleSettingsChanged);
     unawaited(_cameraCoordinator.initialize());
     unawaited(_refreshPendingMedia());
+    unawaited(_loadRecentThumbnail());
   }
 
   @override
@@ -81,25 +86,6 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() {});
     _syncHardwareCapture();
     final CameraSessionState state = _cameraCoordinator.state;
-    final bool cameraAvailable =
-        state == CameraSessionState.ready ||
-        state == CameraSessionState.processing ||
-        state == CameraSessionState.recording;
-    if (cameraAvailable &&
-        _lastLocationGeneration != _cameraCoordinator.generation) {
-      _lastLocationGeneration = _cameraCoordinator.generation;
-      _locationAttempted = false;
-    }
-    if (state == CameraSessionState.interrupted) {
-      _locationAttempted = false;
-    }
-    if (!_locationAttempted &&
-        (state == CameraSessionState.ready ||
-            state == CameraSessionState.processing ||
-            state == CameraSessionState.recording)) {
-      _locationAttempted = true;
-      unawaited(_resolveLocation());
-    }
     if (state == CameraSessionState.processing &&
         _cameraCoordinator.pendingInterruptedRecording != null &&
         !_handlingInterruptedRecording) {
@@ -112,52 +98,47 @@ class _CameraScreenState extends State<CameraScreen> {
     if (!mounted) {
       return;
     }
-    final String manualLocation = widget.settings.manualLocation.trim();
-    if (manualLocation.isNotEmpty) {
-      setState(() {
-        _locationText = manualLocation;
-        _locationFailure = null;
-        _locationLoading = false;
-        _locationAttempted = true;
-      });
-      _syncHardwareCapture();
-      return;
-    }
-
     setState(() {
-      _locationText = null;
+      _locationText = widget.settings.activeLocation;
       _locationFailure = null;
-      _locationAttempted = false;
     });
-    unawaited(_resolveLocation());
     _syncHardwareCapture();
   }
 
-  Future<void> _resolveLocation() async {
-    if (_locationLoading || _isShuttingDown) {
+  Future<void> _refreshLocation() async {
+    if (_locationLoading ||
+        _isShuttingDown ||
+        _settingsOpen ||
+        _galleryOpen ||
+        _cameraCoordinator.state != CameraSessionState.ready) {
       return;
     }
-    setState(() => _locationLoading = true);
+    setState(() {
+      _locationLoading = true;
+      _locationFailure = null;
+    });
     try {
-      final String location = await _locationService.resolveLocation();
-      if (!mounted) {
+      final ResolvedLocation location = await _locationService
+          .refreshLocation();
+      if (!mounted || _isShuttingDown) {
         return;
       }
-      setState(() {
-        _locationText = location;
-        _locationFailure = null;
-        _locationAttempted = true;
-      });
-      _syncHardwareCapture();
+      await widget.settings.useAutomaticLocation(location.text);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '已更新地点：${location.text}（定位精度约 ${location.accuracyMeters.ceil()} 米）',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     } on LocationUnavailableException catch (error) {
       if (!mounted) {
         return;
       }
-      setState(() {
-        _locationText = null;
-        _locationFailure = error;
-        _locationAttempted = true;
-      });
+      setState(() => _locationFailure = error);
     } finally {
       if (mounted) {
         setState(() => _locationLoading = false);
@@ -186,29 +167,50 @@ class _CameraScreenState extends State<CameraScreen> {
     await _cameraCoordinator.retry();
   }
 
-  Future<String> _locationForCapture() async {
+  String _locationForCapture() {
+    final String? location = _locationText;
+    if (location == null) {
+      throw StateError('A capture requires a selected location.');
+    }
+    return location;
+  }
+
+  Future<void> _loadRecentThumbnail() async {
+    final int generation = _thumbnailGeneration;
     try {
-      final String location = await _locationService.resolveLocation();
-      if (!mounted || _isShuttingDown) {
-        throw StateError(
-          'The camera screen closed before location resolution completed.',
-        );
+      final RecentCaptureThumbnail? thumbnail = await _watermarkBridge
+          .recentThumbnail();
+      if (thumbnail == null) {
+        return;
+      }
+      final Uint8List bytes = await File(thumbnail.path).readAsBytes();
+      if (!mounted || generation != _thumbnailGeneration) {
+        return;
       }
       setState(() {
-        _locationText = location;
-        _locationFailure = null;
-        _locationAttempted = true;
+        _recentThumbnail = thumbnail;
+        _recentThumbnailBytes = bytes;
       });
-      return location;
-    } on LocationUnavailableException catch (error) {
-      if (mounted) {
-        setState(() {
-          _locationText = null;
-          _locationFailure = error;
-          _locationAttempted = true;
-        });
+    } on Object catch (error) {
+      _showMediaError(error);
+    }
+  }
+
+  Future<void> _updateRecentThumbnail(String sourcePath, String kind) async {
+    final int generation = ++_thumbnailGeneration;
+    try {
+      final RecentCaptureThumbnail thumbnail = await _watermarkBridge
+          .updateRecentThumbnail(sourcePath: sourcePath, kind: kind);
+      final Uint8List bytes = await File(thumbnail.path).readAsBytes();
+      if (!mounted || generation != _thumbnailGeneration) {
+        return;
       }
-      rethrow;
+      setState(() {
+        _recentThumbnail = thumbnail;
+        _recentThumbnailBytes = bytes;
+      });
+    } on Object catch (error) {
+      _showMediaError(error);
     }
   }
 
@@ -230,10 +232,14 @@ class _CameraScreenState extends State<CameraScreen> {
         _galleryOpen) {
       return;
     }
+    if (_mediaMessage != null && mounted) {
+      setState(() => _mediaMessage = null);
+    }
     try {
-      final String location = await _locationForCapture();
+      final String location = _locationForCapture();
       final WatermarkSnapshot snapshot = _snapshotAt(location, DateTime.now());
       final XFile source = await _cameraCoordinator.takePicture();
+      await _updateRecentThumbnail(source.path, 'photo');
       await _processCapturedMedia(source, snapshot, 'photo');
     } on Object catch (error) {
       _showMediaError(error);
@@ -247,7 +253,7 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
     try {
-      final String location = await _locationForCapture();
+      final String location = _locationForCapture();
       WatermarkSnapshot? snapshot;
       final bool started = await _cameraCoordinator.startVideoRecording(
         onRecordingStarting: () {
@@ -285,6 +291,7 @@ class _CameraScreenState extends State<CameraScreen> {
       if (snapshot == null) {
         throw StateError('The recording has no frozen watermark snapshot.');
       }
+      await _updateRecentThumbnail(source.path, 'video');
       await _processCapturedMedia(source, snapshot, 'video');
     } on Object catch (error) {
       _showMediaError(error);
@@ -309,6 +316,7 @@ class _CameraScreenState extends State<CameraScreen> {
         );
       }
       _recordingSnapshot = null;
+      await _updateRecentThumbnail(source.path, 'video');
       await _processCapturedMedia(source, snapshot, 'video');
     } on Object catch (error) {
       _showMediaError(error);
@@ -330,7 +338,6 @@ class _CameraScreenState extends State<CameraScreen> {
     if (mounted) {
       setState(() {
         _mediaBusy = true;
-        _mediaMessage = null;
       });
       _syncHardwareCapture();
     }
@@ -349,6 +356,7 @@ class _CameraScreenState extends State<CameraScreen> {
               sourcePath: source.path,
               snapshot: snapshot,
             );
+      await _updateRecentThumbnail(renderedPath, kind);
       await _galleryBridge.markRendered(
         taskId: taskId,
         renderedPath: renderedPath,
@@ -524,8 +532,19 @@ class _CameraScreenState extends State<CameraScreen> {
     if (cameraError != null) {
       return cameraError;
     }
-    return _locationFailure?.userMessage;
+    if (_locationFailure case final LocationUnavailableException failure) {
+      return failure.userMessage;
+    }
+    if (_locationText == null && !_locationLoading) {
+      return '尚未设置拍摄地点。请点右上角定位按钮，或在设置中填写。';
+    }
+    return null;
   }
+
+  bool get _locationNeedsSystemSettings =>
+      _locationFailure?.reason == LocationUnavailableReason.reducedAccuracy ||
+      _locationFailure?.reason ==
+          LocationUnavailableReason.permissionDeniedForever;
 
   String _flashLabel(FlashMode mode) {
     if (_cameraCoordinator.captureMode == CameraCaptureMode.video) {
@@ -654,7 +673,6 @@ class _CameraScreenState extends State<CameraScreen> {
               color: selected ? _accentColor : Colors.white70,
               fontSize: 15,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-              letterSpacing: 1,
             ),
           ),
         ),
@@ -811,6 +829,33 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
+  Widget _buildLocationControl(CameraSessionState cameraState) {
+    final bool enabled =
+        cameraState == CameraSessionState.ready &&
+        !_locationLoading &&
+        !_settingsOpen &&
+        !_galleryOpen;
+    return IconButton(
+      tooltip: '刷新定位',
+      onPressed: enabled ? () => unawaited(_refreshLocation()) : null,
+      style: IconButton.styleFrom(
+        fixedSize: const Size(42, 42),
+        foregroundColor: Colors.white,
+        disabledForegroundColor: Colors.white38,
+        shape: const CircleBorder(),
+      ),
+      icon: _locationLoading
+          ? const SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(Icons.my_location_rounded, size: 20),
+    );
+  }
+
   Widget _buildTopBar(CameraSessionState cameraState) {
     return Row(
       children: <Widget>[
@@ -826,10 +871,12 @@ class _CameraScreenState extends State<CameraScreen> {
             children: <Widget>[
               _buildFlashControl(cameraState == CameraSessionState.ready),
               const SizedBox(width: 4),
+              _buildLocationControl(cameraState),
+              const SizedBox(width: 4),
               _buildTopAction(
                 tooltip: '设置',
                 icon: Icons.more_horiz_rounded,
-                onPressed: _openSettings,
+                onPressed: _locationLoading ? null : _openSettings,
               ),
             ],
           ),
@@ -843,16 +890,98 @@ class _CameraScreenState extends State<CameraScreen> {
         !_mediaBusy &&
         cameraState != CameraSessionState.recording &&
         cameraState != CameraSessionState.processing;
-    return IconButton(
-      tooltip: '照片与视频',
-      onPressed: enabled ? _openGallery : null,
-      style: IconButton.styleFrom(
-        fixedSize: const Size(54, 54),
-        backgroundColor: AppPalette.surface,
-        foregroundColor: Colors.white,
-        shape: const CircleBorder(),
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: '浏览照片与视频',
+      child: Tooltip(
+        message: '浏览照片与视频',
+        child: SizedBox.square(
+          dimension: 82,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: enabled ? _openGallery : null,
+              child: Stack(
+                fit: StackFit.expand,
+                children: <Widget>[
+                  if (_recentThumbnailBytes case final Uint8List bytes)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.memory(
+                        bytes,
+                        fit: BoxFit.cover,
+                        cacheWidth: 480,
+                        gaplessPlayback: true,
+                      ),
+                    )
+                  else
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: AppPalette.surface,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.photo_library_outlined,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      height: 22,
+                      alignment: Alignment.center,
+                      decoration: const BoxDecoration(
+                        color: Color(0xB3000000),
+                        borderRadius: BorderRadius.vertical(
+                          bottom: Radius.circular(10),
+                        ),
+                      ),
+                      child: const Text(
+                        '浏览',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_recentThumbnail?.kind == 'video')
+                    const Positioned(
+                      top: 4,
+                      left: 4,
+                      child: Icon(
+                        Icons.play_circle_fill_rounded,
+                        color: Colors.white,
+                        size: 20,
+                        shadows: <Shadow>[
+                          Shadow(color: Colors.black87, blurRadius: 4),
+                        ],
+                      ),
+                    ),
+                  if (_mediaBusy)
+                    const Positioned(
+                      top: 5,
+                      right: 5,
+                      child: SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
-      icon: const Icon(Icons.photo_outlined, size: 24),
     );
   }
 
@@ -895,7 +1024,25 @@ class _CameraScreenState extends State<CameraScreen> {
                                       height:
                                           constraints.maxWidth /
                                           previewAspectRatio,
-                                      child: CameraPreview(controller),
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: <Widget>[
+                                          CameraPreview(controller),
+                                          if (_locationText
+                                              case final String locationText)
+                                            LiveWatermarkPreview(
+                                              locationText: locationText,
+                                              customText:
+                                                  widget.settings.customText,
+                                              frozenSnapshot:
+                                                  cameraState ==
+                                                      CameraSessionState
+                                                          .recording
+                                                  ? _recordingSnapshot
+                                                  : null,
+                                            ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -911,10 +1058,14 @@ class _CameraScreenState extends State<CameraScreen> {
                           message: errorText,
                           actionLabel: cameraState == CameraSessionState.error
                               ? '重试相机'
-                              : '填写地点',
+                              : _locationNeedsSystemSettings
+                              ? '系统设置'
+                              : '刷新定位',
                           onAction: cameraState == CameraSessionState.error
                               ? _retryCamera
-                              : _openSettings,
+                              : _locationNeedsSystemSettings
+                              ? _openSystemSettings
+                              : _refreshLocation,
                         ),
                       ),
                     if (_mediaMessage case final String mediaMessage)
@@ -934,11 +1085,20 @@ class _CameraScreenState extends State<CameraScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: <Widget>[
-                      _buildGalleryControl(cameraState),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: _buildGalleryControl(cameraState),
+                        ),
+                      ),
                       _buildCaptureButton(cameraState),
-                      _buildCameraSwitchControl(canChangeMode),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: _buildCameraSwitchControl(canChangeMode),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 22),

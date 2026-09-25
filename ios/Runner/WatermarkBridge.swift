@@ -21,6 +21,7 @@ private enum WatermarkBridgeError: Error, LocalizedError {
   case resolutionTooLow(width: Int, height: Int)
   case watermarkLayoutDoesNotFit(String)
   case renderFailed
+  case thumbnailFailed(String)
 
   var code: String {
     switch self {
@@ -50,6 +51,8 @@ private enum WatermarkBridgeError: Error, LocalizedError {
       return "watermark_layout_does_not_fit"
     case .renderFailed:
       return "render_failed"
+    case .thumbnailFailed:
+      return "thumbnail_failed"
     }
   }
 
@@ -73,6 +76,8 @@ private enum WatermarkBridgeError: Error, LocalizedError {
       return message
     case .renderFailed:
       return "The watermarked JPEG could not be rendered."
+    case let .thumbnailFailed(message):
+      return message
     }
   }
 }
@@ -205,6 +210,27 @@ private struct VideoRenderRequest {
   }
 }
 
+private struct RecentThumbnailRequest {
+  let sourceURL: URL
+  let kind: String
+
+  init(arguments: Any?) throws {
+    guard let parameters = arguments as? [String: Any],
+          Set(parameters.keys) == Set(["sourcePath", "kind"]),
+          let sourcePath = parameters["sourcePath"] as? String,
+          sourcePath.hasPrefix("/"),
+          let kind = parameters["kind"] as? String,
+          ["photo", "video"].contains(kind)
+    else {
+      throw WatermarkBridgeError.invalidArguments(
+        "updateRecentThumbnail expects an absolute sourcePath and a photo or video kind."
+      )
+    }
+    sourceURL = URL(fileURLWithPath: sourcePath).standardizedFileURL
+    self.kind = kind
+  }
+}
+
 final class WatermarkBridge {
   private let channel: FlutterMethodChannel
 
@@ -234,8 +260,152 @@ final class WatermarkBridge {
       handlePhotoRender(call.arguments, result: result)
     case "renderVideo":
       handleVideoRender(call.arguments, result: result)
+    case "updateRecentThumbnail":
+      handleRecentThumbnailUpdate(call.arguments, result: result)
+    case "recentThumbnail":
+      handleRecentThumbnailLookup(result: result)
     default:
       result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func handleRecentThumbnailUpdate(
+    _ arguments: Any?,
+    result: @escaping FlutterResult
+  ) {
+    let request: RecentThumbnailRequest
+    do {
+      request = try RecentThumbnailRequest(arguments: arguments)
+    } catch {
+      result(Self.flutterError(for: error))
+      return
+    }
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      do {
+        let thumbnailURL = try Self.updateRecentThumbnail(request)
+        DispatchQueue.main.async {
+          result([
+            "thumbnailPath": thumbnailURL.path,
+            "kind": request.kind,
+          ])
+        }
+      } catch {
+        let flutterError = Self.flutterError(for: error)
+        DispatchQueue.main.async {
+          result(flutterError)
+        }
+      }
+    }
+  }
+
+  private func handleRecentThumbnailLookup(result: @escaping FlutterResult) {
+    do {
+      guard let thumbnail = try Self.latestRecentThumbnail() else {
+        result(nil)
+        return
+      }
+      result([
+        "thumbnailPath": thumbnail.url.path,
+        "kind": thumbnail.kind,
+      ])
+    } catch {
+      result(Self.flutterError(for: error))
+    }
+  }
+
+  private static func updateRecentThumbnail(
+    _ request: RecentThumbnailRequest
+  ) throws -> URL {
+    try validateTemporaryFile(request.sourceURL)
+
+    let image: CGImage
+    if request.kind == "photo" {
+      let thumbnailOptions: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: 480,
+        kCGImageSourceShouldCacheImmediately: true,
+      ]
+      guard let imageSource = CGImageSourceCreateWithURL(request.sourceURL as CFURL, nil),
+            let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+              imageSource,
+              0,
+              thumbnailOptions as CFDictionary
+            )
+      else {
+        throw WatermarkBridgeError.thumbnailFailed(
+          "拍摄已完成，但无法读取照片缩略图。"
+        )
+      }
+      image = thumbnail
+    } else {
+      let generator = AVAssetImageGenerator(asset: AVURLAsset(url: request.sourceURL))
+      generator.appliesPreferredTrackTransform = true
+      generator.maximumSize = CGSize(width: 480, height: 480)
+      do {
+        image = try generator.copyCGImage(at: .zero, actualTime: nil)
+      } catch {
+        throw WatermarkBridgeError.thumbnailFailed(
+          "录像已完成，但无法读取视频缩略图：\(error.localizedDescription)"
+        )
+      }
+    }
+
+    guard let jpegData = UIImage(cgImage: image).jpegData(compressionQuality: 0.78),
+          !jpegData.isEmpty
+    else {
+      throw WatermarkBridgeError.thumbnailFailed("拍摄已完成，但无法生成缩略图文件。")
+    }
+
+    guard let applicationSupport = FileManager.default.urls(
+      for: .applicationSupportDirectory,
+      in: .userDomainMask
+    ).first else {
+      throw WatermarkBridgeError.thumbnailFailed("无法访问应用缩略图目录。")
+    }
+    let directory = applicationSupport.appendingPathComponent("proofshot", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: directory,
+      withIntermediateDirectories: true
+    )
+    let thumbnailURL = directory.appendingPathComponent(
+      "recent-capture-\(request.kind).jpg"
+    )
+    try jpegData.write(to: thumbnailURL, options: .atomic)
+    let values = try thumbnailURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+    guard values.isRegularFile == true, (values.fileSize ?? 0) > 0 else {
+      throw WatermarkBridgeError.thumbnailFailed("缩略图文件写入失败。")
+    }
+    return thumbnailURL
+  }
+
+  private static func latestRecentThumbnail() throws -> (url: URL, kind: String)? {
+    guard let applicationSupport = FileManager.default.urls(
+      for: .applicationSupportDirectory,
+      in: .userDomainMask
+    ).first else {
+      throw WatermarkBridgeError.thumbnailFailed("无法访问应用缩略图目录。")
+    }
+    let directory = applicationSupport.appendingPathComponent("proofshot", isDirectory: true)
+    let fileManager = FileManager.default
+    var available: [(url: URL, kind: String, modifiedAt: Date)] = []
+    for kind in ["photo", "video"] {
+      let url = directory.appendingPathComponent("recent-capture-\(kind).jpg")
+      guard fileManager.fileExists(atPath: url.path) else {
+        continue
+      }
+      let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey])
+      guard values.isRegularFile == true,
+            (values.fileSize ?? 0) > 0,
+            let modifiedAt = values.contentModificationDate
+      else {
+        throw WatermarkBridgeError.thumbnailFailed("最近拍摄的缩略图文件无效。")
+      }
+      available.append((url, kind, modifiedAt))
+    }
+    return available.max { $0.modifiedAt < $1.modifiedAt }.map {
+      (url: $0.url, kind: $0.kind)
     }
   }
 

@@ -1,9 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-
-import '../settings/watermark_settings.dart';
 
 enum LocationUnavailableReason {
   serviceDisabled,
@@ -13,6 +13,10 @@ enum LocationUnavailableReason {
   timedOut,
   stalePosition,
   invalidCoordinates,
+  invalidAccuracy,
+  inaccuratePosition,
+  reducedAccuracy,
+  precisionUnknown,
   noPlacemark,
   locationTooLong,
   platformFailure,
@@ -23,6 +27,7 @@ class LocationUnavailableException implements Exception {
     this.reason, {
     this.platformCode,
     this.platformMessage,
+    this.accuracyMeters,
   }) {
     final bool isPlatformFailure =
         reason == LocationUnavailableReason.platformFailure;
@@ -40,11 +45,29 @@ class LocationUnavailableException implements Exception {
         'Platform error details are only valid for a platform failure.',
       );
     }
+    if (reason == LocationUnavailableReason.inaccuratePosition) {
+      if (accuracyMeters == null ||
+          !accuracyMeters!.isFinite ||
+          accuracyMeters! < 0) {
+        throw ArgumentError.value(
+          accuracyMeters,
+          'accuracyMeters',
+          'An inaccurate position requires a finite horizontal accuracy.',
+        );
+      }
+    } else if (accuracyMeters != null) {
+      throw ArgumentError.value(
+        accuracyMeters,
+        'accuracyMeters',
+        'Horizontal accuracy is only valid for an inaccurate position.',
+      );
+    }
   }
 
   final LocationUnavailableReason reason;
   final String? platformCode;
   final String? platformMessage;
+  final double? accuracyMeters;
 
   String get userMessage {
     if (reason == LocationUnavailableReason.platformFailure) {
@@ -64,6 +87,12 @@ class LocationUnavailableException implements Exception {
       LocationUnavailableReason.timedOut => '定位超时，请重试或手动填写地点。',
       LocationUnavailableReason.stalePosition => '定位结果已过期，请重试或手动填写地点。',
       LocationUnavailableReason.invalidCoordinates => '定位返回了无效坐标，请重试或手动填写地点。',
+      LocationUnavailableReason.invalidAccuracy => '定位没有返回有效精度，请重试或手动填写地点。',
+      LocationUnavailableReason.inaccuratePosition =>
+        '当前定位误差约 ${accuracyMeters!.ceil()} 米，超过 100 米，请到开阔处刷新或手动填写地点。',
+      LocationUnavailableReason.reducedAccuracy =>
+        '系统只允许模糊位置，请在系统设置中开启“精确位置”后刷新。',
+      LocationUnavailableReason.precisionUnknown => '无法确认系统定位精度，请检查定位权限后重试。',
       LocationUnavailableReason.noPlacemark => '无法解析当前位置的地名，请手动填写地点。',
       LocationUnavailableReason.locationTooLong =>
         '当前位置名称超过 40 个字符，请在设置中填写较短地点。',
@@ -77,21 +106,27 @@ class LocationUnavailableException implements Exception {
   String toString() => 'LocationUnavailableException: $userMessage';
 }
 
+class ResolvedLocation {
+  const ResolvedLocation({required this.text, required this.accuracyMeters});
+
+  final String text;
+  final double accuracyMeters;
+}
+
 class LocationService {
-  LocationService({required this.settings})
-    : _geocoding = Geocoding(locale: const Locale('zh', 'CN'));
+  LocationService() : _geocoding = Geocoding(locale: const Locale('zh', 'CN'));
 
   static const Duration _maximumPositionAge = Duration(seconds: 60);
   static const Duration _operationTimeout = Duration(seconds: 20);
+  static const double _maximumHorizontalAccuracyMeters = 100;
 
-  final WatermarkSettings settings;
   final Geocoding _geocoding;
-  String? _cachedAutomaticLocation;
-  DateTime? _cachedPositionTime;
 
-  Future<String> resolveLocation() async {
+  Future<ResolvedLocation> refreshLocation() async {
     try {
-      return await _resolveLocation();
+      return await _refreshLocation();
+    } on TimeoutException {
+      throw LocationUnavailableException(LocationUnavailableReason.timedOut);
     } on PlatformException catch (error) {
       throw LocationUnavailableException(
         LocationUnavailableReason.platformFailure,
@@ -101,23 +136,7 @@ class LocationService {
     }
   }
 
-  Future<String> _resolveLocation() async {
-    final String manualLocation = settings.manualLocation.trim();
-    if (manualLocation.isNotEmpty) {
-      return manualLocation;
-    }
-
-    final String? cachedLocation = _cachedAutomaticLocation;
-    final DateTime? cachedPositionTime = _cachedPositionTime;
-    if (cachedLocation != null && cachedPositionTime != null) {
-      final Duration cachedAge = DateTime.now().difference(
-        cachedPositionTime.toLocal(),
-      );
-      if (!cachedAge.isNegative && cachedAge <= _maximumPositionAge) {
-        return cachedLocation;
-      }
-    }
-
+  Future<ResolvedLocation> _refreshLocation() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
       throw LocationUnavailableException(
         LocationUnavailableReason.serviceDisabled,
@@ -146,10 +165,24 @@ class LocationService {
         break;
     }
 
+    final LocationAccuracyStatus accuracyStatus =
+        await Geolocator.getLocationAccuracy();
+    if (accuracyStatus == LocationAccuracyStatus.reduced) {
+      throw LocationUnavailableException(
+        LocationUnavailableReason.reducedAccuracy,
+      );
+    }
+    if (accuracyStatus != LocationAccuracyStatus.precise) {
+      throw LocationUnavailableException(
+        LocationUnavailableReason.precisionUnknown,
+      );
+    }
+
     final Position position = await _withLocationTimeout<Position>(
       Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.best,
+          timeLimit: _operationTimeout,
         ),
       ),
     );
@@ -158,6 +191,18 @@ class LocationService {
     if (positionAge.isNegative || positionAge > _maximumPositionAge) {
       throw LocationUnavailableException(
         LocationUnavailableReason.stalePosition,
+      );
+    }
+    final double horizontalAccuracy = position.accuracy;
+    if (!horizontalAccuracy.isFinite || horizontalAccuracy < 0) {
+      throw LocationUnavailableException(
+        LocationUnavailableReason.invalidAccuracy,
+      );
+    }
+    if (horizontalAccuracy > _maximumHorizontalAccuracyMeters) {
+      throw LocationUnavailableException(
+        LocationUnavailableReason.inaccuratePosition,
+        accuracyMeters: horizontalAccuracy,
       );
     }
     if (!position.latitude.isFinite ||
@@ -192,9 +237,7 @@ class LocationService {
       );
     }
 
-    _cachedAutomaticLocation = location;
-    _cachedPositionTime = positionTime;
-    return location;
+    return ResolvedLocation(text: location, accuracyMeters: horizontalAccuracy);
   }
 
   Future<T> _withLocationTimeout<T>(Future<T> operation) => operation.timeout(
@@ -204,19 +247,21 @@ class LocationService {
   );
 
   String _formatPlacemark(Placemark placemark) {
+    final String? administrativeArea = _nonEmpty(placemark.administrativeArea);
     final String? locality = _nonEmpty(placemark.locality);
     final String? subAdministrativeArea = _nonEmpty(
       placemark.subAdministrativeArea,
     );
     final String? street =
-        _nonEmpty(placemark.street) ??
-        _nonEmpty(placemark.thoroughfare) ??
-        _nonEmpty(placemark.name);
+        _nonEmpty(placemark.thoroughfare) ?? _nonEmpty(placemark.street);
     final List<String> parts = <String>[];
     for (final String? value in <String?>[
-      locality ?? subAdministrativeArea,
+      administrativeArea,
+      locality,
+      subAdministrativeArea,
       _nonEmpty(placemark.subLocality),
       street,
+      if (street != null) _nonEmpty(placemark.subThoroughfare),
     ]) {
       if (value == null) {
         continue;

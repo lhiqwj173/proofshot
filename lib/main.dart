@@ -36,7 +36,7 @@ class _ProofshotAppState extends State<ProofshotApp> {
       theme: ThemeData(
         colorScheme:
             ColorScheme.fromSeed(
-              seedColor: AppPalette.accent,
+              seedColor: Colors.white,
               brightness: Brightness.dark,
               surface: AppPalette.background,
             ).copyWith(
