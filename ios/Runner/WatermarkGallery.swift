@@ -825,6 +825,12 @@ private struct WatermarkGalleryEntry {
   let asset: PHAsset
 }
 
+private enum GalleryPalette {
+  static let background = UIColor(white: 0.031, alpha: 1)
+  static let surface = UIColor(white: 0.141, alpha: 1)
+  static let accent = UIColor(red: 0.952941, green: 0.831373, blue: 0.490196, alpha: 1)
+}
+
 private final class WatermarkMediaCell: UICollectionViewCell {
   static let reuseIdentifier = "WatermarkMediaCell"
 
@@ -838,7 +844,7 @@ private final class WatermarkMediaCell: UICollectionViewCell {
 
   override init(frame: CGRect) {
     super.init(frame: frame)
-    contentView.backgroundColor = UIColor(red: 0.11, green: 0.16, blue: 0.16, alpha: 1)
+    contentView.backgroundColor = GalleryPalette.surface
     contentView.layer.cornerRadius = 11
     contentView.clipsToBounds = true
     imageView.contentMode = .scaleAspectFill
@@ -865,7 +871,7 @@ private final class WatermarkMediaCell: UICollectionViewCell {
     progressView.color = .white
     progressView.translatesAutoresizingMaskIntoConstraints = false
     contentView.addSubview(progressView)
-    selectionMark.tintColor = UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1)
+    selectionMark.tintColor = GalleryPalette.accent
     selectionMark.backgroundColor = UIColor.black.withAlphaComponent(0.55)
     selectionMark.layer.cornerRadius = 15
     selectionMark.contentMode = .center
@@ -904,6 +910,7 @@ private final class WatermarkMediaCell: UICollectionViewCell {
     representedIdentifier = nil
     imageView.image = nil
     typeLabel.text = nil
+    typeLabel.isHidden = true
     errorLabel.isHidden = true
     progressView.stopAnimating()
     selectionMark.isHidden = true
@@ -913,12 +920,13 @@ private final class WatermarkMediaCell: UICollectionViewCell {
     selectionMark.isHidden = !enabled
     selectionMark.image = UIImage(systemName: selected ? "checkmark.circle.fill" : "circle")
     contentView.layer.borderWidth = selected ? 3 : 0
-    contentView.layer.borderColor = UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1).cgColor
+    contentView.layer.borderColor = GalleryPalette.accent.cgColor
   }
 
   func configure(with asset: PHAsset) {
     representedIdentifier = asset.localIdentifier
-    typeLabel.text = asset.mediaType == .video ? "视频" : "照片"
+    typeLabel.isHidden = asset.mediaType != .video
+    typeLabel.text = asset.mediaType == .video ? "视频" : nil
     progressView.startAnimating()
     let options = PHImageRequestOptions()
     options.deliveryMode = .opportunistic
@@ -1001,10 +1009,10 @@ private final class WatermarkGalleryViewController: UIViewController,
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    title = "我的水印"
+    title = "照片与视频"
     overrideUserInterfaceStyle = .dark
-    view.backgroundColor = UIColor(red: 0.055, green: 0.075, blue: 0.085, alpha: 1)
-    navigationController?.navigationBar.tintColor = UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1)
+    view.backgroundColor = GalleryPalette.background
+    navigationController?.navigationBar.tintColor = GalleryPalette.accent
     navigationController?.navigationBar.titleTextAttributes = [.foregroundColor: UIColor.white]
     navigationController?.navigationBar.barTintColor = view.backgroundColor
     navigationItem.leftBarButtonItem = UIBarButtonItem(
@@ -1015,8 +1023,8 @@ private final class WatermarkGalleryViewController: UIViewController,
     updateNavigationActions()
 
     filterControl.selectedSegmentIndex = 0
-    filterControl.selectedSegmentTintColor = UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1)
-    filterControl.backgroundColor = UIColor(white: 0.18, alpha: 1)
+    filterControl.selectedSegmentTintColor = GalleryPalette.accent
+    filterControl.backgroundColor = GalleryPalette.surface
     filterControl.setTitleTextAttributes([.foregroundColor: UIColor(white: 0.08, alpha: 1)], for: .selected)
     filterControl.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
     filterControl.addTarget(self, action: #selector(filterChanged), for: .valueChanged)
@@ -1035,7 +1043,7 @@ private final class WatermarkGalleryViewController: UIViewController,
     view.addSubview(statusLabel)
 
     settingsButton.setTitle("打开系统设置", for: .normal)
-    settingsButton.tintColor = UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1)
+    settingsButton.tintColor = GalleryPalette.accent
     settingsButton.addTarget(self, action: #selector(openSystemSettings), for: .touchUpInside)
     settingsButton.translatesAutoresizingMaskIntoConstraints = false
     settingsButton.isHidden = true
@@ -1059,12 +1067,12 @@ private final class WatermarkGalleryViewController: UIViewController,
     let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
     collectionView.addGestureRecognizer(longPress)
 
-    selectionBar.backgroundColor = UIColor(red: 0.09, green: 0.12, blue: 0.13, alpha: 1)
+    selectionBar.backgroundColor = GalleryPalette.surface
     selectionBar.translatesAutoresizingMaskIntoConstraints = false
     selectionBar.isHidden = true
     view.addSubview(selectionBar)
     selectAllButton.setTitle("全选", for: .normal)
-    selectAllButton.setTitleColor(UIColor(red: 0.78, green: 0.96, blue: 0.83, alpha: 1), for: .normal)
+    selectAllButton.setTitleColor(GalleryPalette.accent, for: .normal)
     selectAllButton.addTarget(self, action: #selector(toggleSelectAll), for: .touchUpInside)
     selectAllButton.translatesAutoresizingMaskIntoConstraints = false
     selectionBar.addSubview(selectAllButton)
@@ -1215,7 +1223,7 @@ private final class WatermarkGalleryViewController: UIViewController,
           UIBarButtonItem(title: "权限", style: .plain, target: self, action: #selector(openSystemSettings))
         )
       }
-      title = "我的水印"
+      title = "照片与视频"
     }
   }
 

@@ -4,6 +4,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../design/app_palette.dart';
 import '../location/location_service.dart';
 import '../media/watermark_bridge.dart';
 import '../media/watermark_gallery_bridge.dart';
@@ -22,8 +23,8 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen> {
-  static const Color _accentColor = Color(0xFFF3D47D);
-  static const Color _recordingColor = Color(0xFFFF716B);
+  static const Color _accentColor = AppPalette.accent;
+  static const Color _recordingColor = AppPalette.recording;
 
   late final CameraCoordinator _cameraCoordinator;
   late final LocationService _locationService;
@@ -556,11 +557,11 @@ class _CameraScreenState extends State<CameraScreen> {
           : null,
       style: IconButton.styleFrom(
         fixedSize: const Size(54, 54),
-        backgroundColor: const Color(0xFF242424),
+        backgroundColor: AppPalette.surface,
         foregroundColor: canSwitch ? Colors.white : Colors.white38,
         shape: const CircleBorder(),
       ),
-      icon: const Icon(Icons.flip_camera_ios_outlined, size: 24),
+      icon: const Icon(Icons.sync_rounded, size: 27),
     );
   }
 
@@ -587,10 +588,6 @@ class _CameraScreenState extends State<CameraScreen> {
         height: 42,
         width: 42,
         alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: const Color(0xFF252525),
-          shape: BoxShape.circle,
-        ),
         child: Icon(
           mode == FlashMode.off
               ? Icons.flash_off_rounded
@@ -606,7 +603,7 @@ class _CameraScreenState extends State<CameraScreen> {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: const Color(0xFF242424),
+        color: AppPalette.surface,
         borderRadius: BorderRadius.circular(28),
       ),
       child: Row(
@@ -648,7 +645,7 @@ class _CameraScreenState extends State<CameraScreen> {
           height: 40,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: selected ? const Color(0xFF3A3A3A) : Colors.transparent,
+            color: selected ? AppPalette.elevatedSurface : Colors.transparent,
             borderRadius: BorderRadius.circular(24),
           ),
           child: Text(
@@ -748,7 +745,7 @@ class _CameraScreenState extends State<CameraScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xEE141D1F),
+        color: AppPalette.surface.withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white24),
       ),
@@ -806,7 +803,7 @@ class _CameraScreenState extends State<CameraScreen> {
       onPressed: onPressed,
       style: IconButton.styleFrom(
         fixedSize: const Size(42, 42),
-        backgroundColor: const Color(0xFF242424),
+        backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
         shape: const CircleBorder(),
       ),
@@ -818,12 +815,24 @@ class _CameraScreenState extends State<CameraScreen> {
     return Row(
       children: <Widget>[
         const Spacer(),
-        _buildFlashControl(cameraState == CameraSessionState.ready),
-        const SizedBox(width: 8),
-        _buildTopAction(
-          tooltip: '设置',
-          icon: Icons.more_horiz_rounded,
-          onPressed: _openSettings,
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+          decoration: BoxDecoration(
+            color: AppPalette.surface,
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              _buildFlashControl(cameraState == CameraSessionState.ready),
+              const SizedBox(width: 4),
+              _buildTopAction(
+                tooltip: '设置',
+                icon: Icons.more_horiz_rounded,
+                onPressed: _openSettings,
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -835,15 +844,15 @@ class _CameraScreenState extends State<CameraScreen> {
         cameraState != CameraSessionState.recording &&
         cameraState != CameraSessionState.processing;
     return IconButton(
-      tooltip: '我的水印',
+      tooltip: '照片与视频',
       onPressed: enabled ? _openGallery : null,
       style: IconButton.styleFrom(
         fixedSize: const Size(54, 54),
-        backgroundColor: const Color(0xFF242424),
+        backgroundColor: AppPalette.surface,
         foregroundColor: Colors.white,
         shape: const CircleBorder(),
       ),
-      icon: const Icon(Icons.photo_library_outlined, size: 23),
+      icon: const Icon(Icons.photo_outlined, size: 24),
     );
   }
 
@@ -854,7 +863,7 @@ class _CameraScreenState extends State<CameraScreen> {
     final bool canChangeMode = cameraState == CameraSessionState.ready;
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppPalette.background,
       body: SafeArea(
         child: Column(
           children: <Widget>[
@@ -864,12 +873,35 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
             Expanded(
               child: ColoredBox(
-                color: Colors.black,
+                color: AppPalette.background,
                 child: Stack(
                   fit: StackFit.expand,
                   children: <Widget>[
                     if (controller != null && controller.value.isInitialized)
-                      Center(child: CameraPreview(controller)),
+                      LayoutBuilder(
+                        builder:
+                            (BuildContext context, BoxConstraints constraints) {
+                              final bool landscape =
+                                  constraints.maxWidth > constraints.maxHeight;
+                              final double previewAspectRatio = landscape
+                                  ? controller.value.aspectRatio
+                                  : 1 / controller.value.aspectRatio;
+                              return ClipRect(
+                                child: SizedBox.expand(
+                                  child: FittedBox(
+                                    fit: BoxFit.cover,
+                                    child: SizedBox(
+                                      width: constraints.maxWidth,
+                                      height:
+                                          constraints.maxWidth /
+                                          previewAspectRatio,
+                                      child: CameraPreview(controller),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                      ),
                     if (_visibleError case final String errorText)
                       Positioned(
                         top: 16,
@@ -935,7 +967,7 @@ class _StatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xF0192526),
+      color: AppPalette.surface.withValues(alpha: 0.94),
       borderRadius: BorderRadius.circular(14),
       child: Padding(
         padding: const EdgeInsets.all(16),

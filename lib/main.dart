@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'camera/camera_screen.dart';
+import 'design/app_palette.dart';
 import 'settings/watermark_settings.dart';
 
 void main() {
@@ -33,27 +34,33 @@ class _ProofshotAppState extends State<ProofshotApp> {
       title: '水印相机',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFC6F4D5),
-          brightness: Brightness.dark,
-          surface: const Color(0xFF111B1D),
-        ),
-        scaffoldBackgroundColor: const Color(0xFF0E1719),
+        colorScheme:
+            ColorScheme.fromSeed(
+              seedColor: AppPalette.accent,
+              brightness: Brightness.dark,
+              surface: AppPalette.background,
+            ).copyWith(
+              primary: AppPalette.accent,
+              onPrimary: AppPalette.background,
+            ),
+        scaffoldBackgroundColor: AppPalette.background,
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF0E1719),
+          backgroundColor: AppPalette.background,
           foregroundColor: Colors.white,
           elevation: 0,
+          centerTitle: true,
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: const Color(0xFF1B292B),
+          fillColor: AppPalette.surface,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             borderSide: BorderSide.none,
           ),
+          hintStyle: const TextStyle(color: AppPalette.secondaryText),
           contentPadding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 18,
+            horizontal: 16,
+            vertical: 16,
           ),
         ),
         useMaterial3: true,
