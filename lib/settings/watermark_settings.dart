@@ -164,78 +164,86 @@ class _WatermarkSettingsPageState extends State<WatermarkSettingsPage> {
   Widget build(BuildContext context) {
     final Color accent = Theme.of(context).colorScheme.primary;
     return Scaffold(
-      appBar: AppBar(title: const Text('水印设置'), centerTitle: false),
+      appBar: AppBar(title: const Text('设置'), centerTitle: false),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+        padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
         children: <Widget>[
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1B292B),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              children: <Widget>[
-                Icon(Icons.verified_outlined, color: accent, size: 28),
-                const SizedBox(width: 14),
-                const Expanded(
-                  child: Text(
-                    '让每张照片都有清晰的时间与地点记录',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 30),
           Text(
-            '拍摄信息',
+            'MAKE IT YOURS / 01',
             style: TextStyle(
               color: accent,
-              fontSize: 13,
+              fontSize: 11,
               fontWeight: FontWeight.w700,
+              letterSpacing: 2.5,
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            '让每一帧\n留下坐标',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 32,
+              fontWeight: FontWeight.w700,
+              height: 1.25,
+              letterSpacing: 0.5,
             ),
           ),
           const SizedBox(height: 12),
+          const Text(
+            '设置画面中的地点与专属文字。拍摄时间会自动记录。',
+            style: TextStyle(color: Colors.white60, fontSize: 14, height: 1.6),
+          ),
+          const SizedBox(height: 42),
+          Text(
+            '01  拍摄地点',
+            style: TextStyle(
+              color: accent,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 14),
           TextField(
             controller: _locationController,
             maxLines: 1,
             maxLength: 40,
             maxLengthEnforcement: MaxLengthEnforcement.enforced,
             decoration: const InputDecoration(
-              labelText: '拍摄地点',
+              hintText: '输入地点，或留空自动定位',
               prefixIcon: Icon(Icons.location_on_outlined),
-              helperText: '填写后优先使用；清空后恢复自动定位',
+              helperText: '填写后优先使用手动地点',
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 34),
           Text(
-            '个性内容',
+            '02  专属文字',
             style: TextStyle(
               color: accent,
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: FontWeight.w700,
+              letterSpacing: 1,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           TextField(
             controller: _customTextController,
             maxLines: 1,
             maxLength: 30,
             maxLengthEnforcement: MaxLengthEnforcement.enforced,
             decoration: const InputDecoration(
-              labelText: '自定义水印文字',
+              hintText: '写一句属于这张照片的话',
               prefixIcon: Icon(Icons.edit_note_outlined),
               helperText: '可留空，最多 30 个字符',
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 46),
           FilledButton(
             onPressed: _isSaving ? null : _save,
             style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(54),
+              minimumSize: const Size.fromHeight(58),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(14),
               ),
             ),
             child: Text(_isSaving ? '保存中…' : '保存设置'),

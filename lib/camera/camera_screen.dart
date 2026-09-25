@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +11,7 @@ import '../settings/watermark_settings.dart';
 import '../watermark/watermark_overlay.dart';
 import '../watermark/watermark_snapshot.dart';
 import 'camera_coordinator.dart';
+import 'hardware_capture_bridge.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({required this.settings, super.key});
@@ -25,12 +25,12 @@ class CameraScreen extends StatefulWidget {
 class _CameraScreenState extends State<CameraScreen> {
   static const Color _accentColor = Color(0xFFC6F4D5);
   static const Color _recordingColor = Color(0xFFFF716B);
-  static const Color _panelColor = Color(0xEB101B1D);
 
   late final CameraCoordinator _cameraCoordinator;
   late final LocationService _locationService;
   late final WatermarkBridge _watermarkBridge;
   late final WatermarkGalleryBridge _galleryBridge;
+  late final HardwareCaptureBridge _hardwareCaptureBridge;
   late final Timer _previewClock;
   String? _locationText;
   LocationUnavailableException? _locationFailure;
@@ -41,6 +41,9 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isShuttingDown = false;
   bool _mediaBusy = false;
   bool _handlingInterruptedRecording = false;
+  bool _settingsOpen = false;
+  bool _galleryOpen = false;
+  bool? _hardwareCaptureEnabled;
   WatermarkSnapshot? _recordingSnapshot;
   List<PendingWatermarkMedia> _pendingMedia = <PendingWatermarkMedia>[];
   String? _mediaMessage;
@@ -53,6 +56,7 @@ class _CameraScreenState extends State<CameraScreen> {
     _locationService = LocationService(settings: widget.settings);
     _watermarkBridge = WatermarkBridge();
     _galleryBridge = WatermarkGalleryBridge();
+    _hardwareCaptureBridge = HardwareCaptureBridge(_capturePhoto);
     widget.settings.addListener(_handleSettingsChanged);
     unawaited(_cameraCoordinator.initialize());
     unawaited(_refreshPendingMedia());
@@ -70,6 +74,11 @@ class _CameraScreenState extends State<CameraScreen> {
     _previewClock.cancel();
     widget.settings.removeListener(_handleSettingsChanged);
     _cameraCoordinator.removeListener(_handleCameraStateChanged);
+    unawaited(
+      _hardwareCaptureBridge.setEnabled(false).then((_) {
+        _hardwareCaptureBridge.dispose();
+      }),
+    );
     unawaited(_cameraCoordinator.shutdown());
     super.dispose();
   }
@@ -79,6 +88,7 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
     setState(() {});
+    _syncHardwareCapture();
     final CameraSessionState state = _cameraCoordinator.state;
     final bool cameraAvailable =
         state == CameraSessionState.ready ||
@@ -120,6 +130,7 @@ class _CameraScreenState extends State<CameraScreen> {
         _locationAttempted = true;
         _refreshPreviewSnapshot();
       });
+      _syncHardwareCapture();
       return;
     }
 
@@ -130,6 +141,7 @@ class _CameraScreenState extends State<CameraScreen> {
       _refreshPreviewSnapshot();
     });
     unawaited(_resolveLocation());
+    _syncHardwareCapture();
   }
 
   Future<void> _resolveLocation() async {
@@ -148,6 +160,7 @@ class _CameraScreenState extends State<CameraScreen> {
         _locationAttempted = true;
         _refreshPreviewSnapshot();
       });
+      _syncHardwareCapture();
     } on LocationUnavailableException catch (error) {
       if (!mounted) {
         return;
@@ -161,6 +174,7 @@ class _CameraScreenState extends State<CameraScreen> {
     } finally {
       if (mounted) {
         setState(() => _locationLoading = false);
+        _syncHardwareCapture();
       }
     }
   }
@@ -179,12 +193,19 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _openSettings() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (BuildContext context) =>
-            WatermarkSettingsPage(settings: widget.settings),
-      ),
-    );
+    _settingsOpen = true;
+    _syncHardwareCapture();
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) =>
+              WatermarkSettingsPage(settings: widget.settings),
+        ),
+      );
+    } finally {
+      _settingsOpen = false;
+      _syncHardwareCapture();
+    }
   }
 
   Future<void> _retryCamera() async {
@@ -228,7 +249,13 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _capturePhoto() async {
-    if (_cameraCoordinator.state != CameraSessionState.ready || _mediaBusy) {
+    if (_cameraCoordinator.state != CameraSessionState.ready ||
+        _cameraCoordinator.captureMode != CameraCaptureMode.photo ||
+        _locationText == null ||
+        _mediaBusy ||
+        _isShuttingDown ||
+        _settingsOpen ||
+        _galleryOpen) {
       return;
     }
     try {
@@ -331,8 +358,9 @@ class _CameraScreenState extends State<CameraScreen> {
     if (mounted) {
       setState(() {
         _mediaBusy = true;
-        _mediaMessage = kind == 'video' ? '正在合成并保存视频…' : '正在合成并保存照片…';
+        _mediaMessage = null;
       });
+      _syncHardwareCapture();
     }
     try {
       final String taskId = await _galleryBridge.prepareMedia(
@@ -355,7 +383,6 @@ class _CameraScreenState extends State<CameraScreen> {
       );
       await _galleryBridge.saveToPhotos(taskId: taskId);
       if (mounted) {
-        setState(() => _mediaMessage = '已保存到系统照片和“我的水印”。');
         unawaited(_refreshPendingMedia());
       }
     } on Object catch (error) {
@@ -364,6 +391,7 @@ class _CameraScreenState extends State<CameraScreen> {
     } finally {
       if (mounted) {
         setState(() => _mediaBusy = false);
+        _syncHardwareCapture();
       }
     }
   }
@@ -414,7 +442,7 @@ class _CameraScreenState extends State<CameraScreen> {
       }
       await _galleryBridge.saveToPhotos(taskId: pending.id);
       if (mounted) {
-        setState(() => _mediaMessage = '恢复完成，成品已保存到系统照片。');
+        setState(() => _mediaMessage = null);
       }
     } on Object catch (error) {
       _showMediaError(error);
@@ -468,11 +496,34 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _openGallery() async {
+    _galleryOpen = true;
+    _syncHardwareCapture();
     try {
       await _galleryBridge.openGallery();
     } on Object catch (error) {
       _showMediaError(error);
+    } finally {
+      _galleryOpen = false;
+      _syncHardwareCapture();
     }
+  }
+
+  void _syncHardwareCapture() {
+    if (!mounted || _isShuttingDown) {
+      return;
+    }
+    final bool enabled =
+        _cameraCoordinator.state == CameraSessionState.ready &&
+        _cameraCoordinator.captureMode == CameraCaptureMode.photo &&
+        _locationText != null &&
+        !_mediaBusy &&
+        !_settingsOpen &&
+        !_galleryOpen;
+    if (_hardwareCaptureEnabled == enabled) {
+      return;
+    }
+    _hardwareCaptureEnabled = enabled;
+    unawaited(_hardwareCaptureBridge.setEnabled(enabled));
   }
 
   Future<void> _openSystemSettings() async {
@@ -540,68 +591,21 @@ class _CameraScreenState extends State<CameraScreen> {
     };
   }
 
-  Widget _buildControlFace({
-    required IconData icon,
-    required String label,
-    required bool enabled,
-  }) {
-    final Color foreground = enabled ? Colors.white : Colors.white38;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: enabled ? 0.09 : 0.04),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-          ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 22, color: foreground),
-        ),
-        const SizedBox(height: 5),
-        Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: foreground, fontSize: 11),
-        ),
-      ],
-    );
-  }
-
   Widget _buildCameraSwitchControl(bool controlsEnabled) {
     final bool canSwitch =
         controlsEnabled && _cameraCoordinator.canSwitchCamera;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        IconButton(
-          tooltip: canSwitch ? '切换前后摄像头' : '当前设备没有可切换的镜头',
-          onPressed: canSwitch
-              ? () => unawaited(_cameraCoordinator.switchCamera())
-              : null,
-          style: IconButton.styleFrom(
-            fixedSize: const Size(48, 48),
-            padding: EdgeInsets.zero,
-            backgroundColor: Colors.white.withValues(
-              alpha: canSwitch ? 0.12 : 0.05,
-            ),
-            foregroundColor: canSwitch ? Colors.white : Colors.white38,
-            shape: const CircleBorder(),
-          ),
-          icon: const Icon(Icons.flip_camera_ios_outlined, size: 22),
-        ),
-        const SizedBox(height: 5),
-        Text(
-          '切换镜头',
-          style: TextStyle(
-            color: canSwitch ? Colors.white : Colors.white38,
-            fontSize: 11,
-          ),
-        ),
-      ],
+    return IconButton(
+      tooltip: canSwitch ? '切换前后摄像头' : '当前设备没有可切换的镜头',
+      onPressed: canSwitch
+          ? () => unawaited(_cameraCoordinator.switchCamera())
+          : null,
+      style: IconButton.styleFrom(
+        fixedSize: const Size(54, 54),
+        backgroundColor: const Color(0xFF1E292A),
+        foregroundColor: canSwitch ? Colors.white : Colors.white38,
+        shape: const CircleBorder(),
+      ),
+      icon: const Icon(Icons.flip_camera_ios_outlined, size: 24),
     );
   }
 
@@ -609,106 +613,111 @@ class _CameraScreenState extends State<CameraScreen> {
     final String? unavailableReason = _cameraCoordinator.flashUnavailableReason;
     final bool enabled = controlsEnabled && unavailableReason == null;
     final FlashMode mode = _cameraCoordinator.flashMode;
-    return Tooltip(
-      message: unavailableReason ?? '闪光和补光设置',
-      child: PopupMenuButton<FlashMode>(
-        enabled: enabled,
-        tooltip: '',
-        onSelected: (FlashMode selectedMode) {
-          unawaited(_cameraCoordinator.setFlashMode(selectedMode));
-        },
-        itemBuilder: (BuildContext context) => _cameraCoordinator
-            .supportedFlashModes
-            .map(
-              (FlashMode supportedMode) => PopupMenuItem<FlashMode>(
-                value: supportedMode,
-                child: Text(_flashLabel(supportedMode)),
+    return PopupMenuButton<FlashMode>(
+      enabled: enabled,
+      tooltip: unavailableReason ?? '闪光和补光设置',
+      onSelected: (FlashMode selectedMode) {
+        unawaited(_cameraCoordinator.setFlashMode(selectedMode));
+      },
+      itemBuilder: (BuildContext context) => _cameraCoordinator
+          .supportedFlashModes
+          .map(
+            (FlashMode supportedMode) => PopupMenuItem<FlashMode>(
+              value: supportedMode,
+              child: Text(_flashLabel(supportedMode)),
+            ),
+          )
+          .toList(growable: false),
+      child: Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xD9131A1B),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              mode == FlashMode.off
+                  ? Icons.flash_off_outlined
+                  : Icons.flash_on_outlined,
+              color: enabled ? _accentColor : Colors.white38,
+              size: 19,
+            ),
+            const SizedBox(width: 7),
+            Text(
+              unavailableReason == null ? _flashLabel(mode) : '不可用',
+              style: TextStyle(
+                color: enabled ? Colors.white : Colors.white38,
+                fontSize: 12,
               ),
-            )
-            .toList(growable: false),
-        child: _buildControlFace(
-          icon: mode == FlashMode.off ? Icons.flash_off : Icons.flash_on,
-          label: unavailableReason == null ? _flashLabel(mode) : '不可用',
-          enabled: enabled,
+            ),
+          ],
         ),
       ),
     );
   }
 
   Widget _buildCaptureModeControl(bool canChangeMode) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        children: <Widget>[
-          _buildCaptureModeOption(
-            mode: CameraCaptureMode.photo,
-            icon: Icons.photo_outlined,
-            label: '照片',
-            canChangeMode: canChangeMode,
-          ),
-          _buildCaptureModeOption(
-            mode: CameraCaptureMode.video,
-            icon: Icons.videocam_outlined,
-            label: '视频',
-            canChangeMode: canChangeMode,
-          ),
-        ],
-      ),
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: <Widget>[
+        _buildCaptureModeOption(
+          mode: CameraCaptureMode.photo,
+          label: '拍照',
+          canChangeMode: canChangeMode,
+        ),
+        const SizedBox(width: 32),
+        _buildCaptureModeOption(
+          mode: CameraCaptureMode.video,
+          label: '录像',
+          canChangeMode: canChangeMode,
+        ),
+      ],
     );
   }
 
   Widget _buildCaptureModeOption({
     required CameraCaptureMode mode,
-    required IconData icon,
     required String label,
     required bool canChangeMode,
   }) {
     final bool selected = _cameraCoordinator.captureMode == mode;
-    return Expanded(
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: label,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: !canChangeMode || selected
-                ? null
-                : () => unawaited(_cameraCoordinator.setCaptureMode(mode)),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              height: 44,
-              decoration: BoxDecoration(
-                color: selected ? _accentColor : Colors.transparent,
-                borderRadius: BorderRadius.circular(14),
-                border: selected ? Border.all(color: _accentColor) : null,
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: InkWell(
+        onTap: !canChangeMode || selected
+            ? null
+            : () => unawaited(_cameraCoordinator.setCaptureMode(mode)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 13),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? _accentColor : Colors.white54,
+                  fontSize: 15,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  letterSpacing: 1,
+                ),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  Icon(
-                    icon,
-                    size: 19,
-                    color: selected ? const Color(0xFF10201B) : Colors.white70,
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: selected
-                          ? const Color(0xFF10201B)
-                          : Colors.white70,
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 6),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                width: selected ? 18 : 0,
+                height: 2,
+                decoration: BoxDecoration(
+                  color: _accentColor,
+                  borderRadius: BorderRadius.circular(1),
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),
@@ -793,67 +802,34 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget _buildLocationIndicator() {
     final String location =
         _locationText ?? (_locationLoading ? '正在获取街道位置…' : '点击填写拍摄地点');
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.48),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-          ),
+    return Material(
+      color: const Color(0xE611191A),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: _openSettings,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
           child: Row(
             children: <Widget>[
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: _accentColor.withValues(alpha: 0.18),
-                  shape: BoxShape.circle,
-                ),
-                alignment: Alignment.center,
-                child: const Icon(
-                  Icons.location_on_outlined,
-                  color: _accentColor,
-                  size: 20,
-                ),
+              const Icon(
+                Icons.location_on_outlined,
+                color: _accentColor,
+                size: 17,
               ),
-              const SizedBox(width: 11),
+              const SizedBox(width: 8),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    const Text(
-                      '拍摄地点',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      location,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  location,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
                 ),
               ),
-              IconButton(
-                tooltip: '编辑拍摄地点',
-                onPressed: _openSettings,
-                visualDensity: VisualDensity.compact,
-                color: Colors.white70,
-                icon: const Icon(Icons.edit_outlined, size: 19),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Colors.white54,
+                size: 18,
               ),
             ],
           ),
@@ -867,8 +843,13 @@ class _CameraScreenState extends State<CameraScreen> {
       foregroundColor: _accentColor,
       visualDensity: VisualDensity.compact,
     );
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xEE141D1F),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white24),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -922,13 +903,12 @@ class _CameraScreenState extends State<CameraScreen> {
       tooltip: tooltip,
       onPressed: onPressed,
       style: IconButton.styleFrom(
-        fixedSize: const Size(46, 46),
-        padding: EdgeInsets.zero,
-        backgroundColor: Colors.white.withValues(alpha: 0.09),
+        fixedSize: const Size(42, 42),
+        backgroundColor: const Color(0xFF1D2829),
         foregroundColor: Colors.white,
-        shape: const CircleBorder(),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-      icon: Icon(icon, size: 21),
+      icon: Icon(icon, size: 20),
     );
   }
 
@@ -937,99 +917,93 @@ class _CameraScreenState extends State<CameraScreen> {
       CameraSessionState.ready => _accentColor,
       CameraSessionState.recording => _recordingColor,
       CameraSessionState.error => const Color(0xFFFFC56E),
-      _ => Colors.white70,
+      _ => Colors.white54,
     };
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          height: 62,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+    return Row(
+      children: <Widget>[
+        Container(
+          width: 42,
+          height: 42,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: _panelColor,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+            color: _accentColor,
+            borderRadius: BorderRadius.circular(12),
           ),
-          child: Row(
+          child: const Icon(
+            Icons.center_focus_strong,
+            color: Color(0xFF12201A),
+            size: 22,
+          ),
+        ),
+        const SizedBox(width: 11),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const SizedBox(width: 8),
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: _accentColor.withValues(alpha: 0.18),
-                  shape: BoxShape.circle,
-                ),
-                alignment: Alignment.center,
-                child: const Icon(
-                  Icons.center_focus_strong_outlined,
-                  color: _accentColor,
-                  size: 18,
+              const Text(
+                'PROOFSHOT',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 2,
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    const Text(
-                      '水印相机',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+              const SizedBox(height: 2),
+              Row(
+                children: <Widget>[
+                  Container(
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: stateColor,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      _statusText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white60,
+                        fontSize: 10,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: <Widget>[
-                        Container(
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            color: stateColor,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 5),
-                        Flexible(
-                          child: Text(
-                            _statusText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 10,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              _buildTopAction(
-                tooltip: '我的水印',
-                icon: Icons.grid_view_rounded,
-                onPressed:
-                    _mediaBusy ||
-                        cameraState == CameraSessionState.recording ||
-                        cameraState == CameraSessionState.processing
-                    ? null
-                    : _openGallery,
-              ),
-              const SizedBox(width: 4),
-              _buildTopAction(
-                tooltip: '水印设置',
-                icon: Icons.tune_rounded,
-                onPressed: _openSettings,
+                  ),
+                ],
               ),
             ],
           ),
         ),
+        _buildFlashControl(cameraState == CameraSessionState.ready),
+        const SizedBox(width: 8),
+        _buildTopAction(
+          tooltip: '水印设置',
+          icon: Icons.tune_rounded,
+          onPressed: _openSettings,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGalleryControl(CameraSessionState cameraState) {
+    final bool enabled =
+        !_mediaBusy &&
+        cameraState != CameraSessionState.recording &&
+        cameraState != CameraSessionState.processing;
+    return IconButton(
+      tooltip: '我的水印',
+      onPressed: enabled ? _openGallery : null,
+      style: IconButton.styleFrom(
+        fixedSize: const Size(54, 54),
+        backgroundColor: const Color(0xFF1E292A),
+        foregroundColor: Colors.white,
+        shape: const CircleBorder(),
       ),
+      icon: const Icon(Icons.grid_view_rounded, size: 23),
     );
   }
 
@@ -1040,85 +1014,93 @@ class _CameraScreenState extends State<CameraScreen> {
     final bool canChangeMode = cameraState == CameraSessionState.ready;
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFF0D1516),
       body: SafeArea(
-        child: Stack(
-          fit: StackFit.expand,
+        child: Column(
           children: <Widget>[
-            if (controller != null && controller.value.isInitialized)
-              Center(
-                child: CameraPreview(
-                  controller,
-                  child: _previewSnapshot == null
-                      ? const SizedBox.expand()
-                      : WatermarkOverlay(snapshot: _previewSnapshot!),
-                ),
-              )
-            else
-              const ColoredBox(color: Colors.black),
-            Positioned(
-              top: 8,
-              left: 14,
-              right: 14,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
               child: _buildTopBar(cameraState),
             ),
-            if (_visibleError case final String errorText)
-              Positioned(
-                top: 78,
-                left: 16,
-                right: 16,
-                child: _StatusCard(
-                  message: errorText,
-                  actionLabel: cameraState == CameraSessionState.error
-                      ? '重试相机'
-                      : '填写地点',
-                  onAction: cameraState == CameraSessionState.error
-                      ? _retryCamera
-                      : _openSettings,
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: <Widget>[
+                      ColoredBox(
+                        color: Colors.black,
+                        child:
+                            controller != null && controller.value.isInitialized
+                            ? Center(
+                                child: CameraPreview(
+                                  controller,
+                                  child: _previewSnapshot == null
+                                      ? const SizedBox.expand()
+                                      : WatermarkOverlay(
+                                          snapshot: _previewSnapshot!,
+                                        ),
+                                ),
+                              )
+                            : const SizedBox.expand(),
+                      ),
+                      IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                        ),
+                      ),
+                      if (_visibleError case final String errorText)
+                        Positioned(
+                          top: 16,
+                          left: 16,
+                          right: 16,
+                          child: _StatusCard(
+                            message: errorText,
+                            actionLabel: cameraState == CameraSessionState.error
+                                ? '重试相机'
+                                : '填写地点',
+                            onAction: cameraState == CameraSessionState.error
+                                ? _retryCamera
+                                : _openSettings,
+                          ),
+                        ),
+                      if (_mediaMessage case final String mediaMessage)
+                        Positioned(
+                          top: _visibleError == null ? 16 : 114,
+                          left: 16,
+                          right: 16,
+                          child: _buildMediaMessage(mediaMessage),
+                        ),
+                      Positioned(
+                        left: 14,
+                        right: 14,
+                        bottom: 14,
+                        child: _buildLocationIndicator(),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            Positioned(
-              left: 14,
-              right: 14,
-              bottom: 10,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 5, 24, 16),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  _buildLocationIndicator(),
-                  const SizedBox(height: 10),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(26),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                      child: Container(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                        decoration: BoxDecoration(
-                          color: _panelColor,
-                          borderRadius: BorderRadius.circular(26),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.16),
-                          ),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: <Widget>[
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: <Widget>[
-                                _buildCameraSwitchControl(canChangeMode),
-                                _buildCaptureButton(cameraState),
-                                _buildFlashControl(canChangeMode),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            _buildCaptureModeControl(canChangeMode),
-                            if (_mediaMessage case final String mediaMessage)
-                              _buildMediaMessage(mediaMessage),
-                          ],
-                        ),
-                      ),
-                    ),
+                  _buildCaptureModeControl(canChangeMode),
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: <Widget>[
+                      _buildGalleryControl(cameraState),
+                      _buildCaptureButton(cameraState),
+                      _buildCameraSwitchControl(canChangeMode),
+                    ],
                   ),
                 ],
               ),
@@ -1144,15 +1126,22 @@ class _StatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.black.withValues(alpha: 0.72),
-      borderRadius: BorderRadius.circular(12),
+      color: const Color(0xF0192526),
+      borderRadius: BorderRadius.circular(14),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Text(message, style: const TextStyle(color: Colors.white)),
+            Text(
+              message,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                height: 1.45,
+              ),
+            ),
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(onPressed: onAction, child: Text(actionLabel)),

@@ -42,12 +42,11 @@ packages:
     source: hosted
     version: "0.7.4+8"
   camera_avfoundation:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: camera_avfoundation
-      sha256: e409a731fad3fca10daa9567cf981720398659e6390f871a4e0f576058ff8940
-      url: "https://pub.dev"
-    source: hosted
+      path: "vendor/camera_avfoundation"
+      relative: true
+    source: path
     version: "0.10.3+1"
   camera_platform_interface:
     dependency: transitive

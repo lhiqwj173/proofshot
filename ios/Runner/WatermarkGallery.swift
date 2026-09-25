@@ -779,13 +779,13 @@ final class WatermarkGalleryBridge {
         result(Self.flutterError(for: WatermarkGalleryError.galleryPresentationUnavailable))
         return
       }
-      let gallery = WatermarkGalleryViewController(journal: self.journal)
+      let gallery = WatermarkGalleryViewController(journal: self.journal) {
+        result(nil)
+      }
       let navigationController = UINavigationController(rootViewController: gallery)
       navigationController.overrideUserInterfaceStyle = .dark
       navigationController.modalPresentationStyle = .fullScreen
-      presenter.present(navigationController, animated: true) {
-        result(nil)
-      }
+      presenter.present(navigationController, animated: true)
     }
   }
 
@@ -838,7 +838,9 @@ private final class WatermarkMediaCell: UICollectionViewCell {
 
   override init(frame: CGRect) {
     super.init(frame: frame)
-    contentView.backgroundColor = UIColor(white: 0.12, alpha: 1)
+    contentView.backgroundColor = UIColor(red: 0.11, green: 0.16, blue: 0.16, alpha: 1)
+    contentView.layer.cornerRadius = 11
+    contentView.clipsToBounds = true
     imageView.contentMode = .scaleAspectFill
     imageView.clipsToBounds = true
     imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -963,7 +965,9 @@ private final class WatermarkGalleryViewController: UIViewController,
   UICollectionViewDelegateFlowLayout
 {
   private let journal: WatermarkMediaJournal
+  private let onClose: () -> Void
   private let filterControl = UISegmentedControl(items: ["全部", "照片", "视频"])
+  private let countLabel = UILabel()
   private let statusLabel = UILabel()
   private let settingsButton = UIButton(type: .system)
   private let selectionBar = UIView()
@@ -979,12 +983,14 @@ private final class WatermarkGalleryViewController: UIViewController,
   private var selectedIdentifiers = Set<String>()
   private var isDeleting = false
 
-  init(journal: WatermarkMediaJournal) {
+  init(journal: WatermarkMediaJournal, onClose: @escaping () -> Void) {
     self.journal = journal
+    self.onClose = onClose
     let layout = UICollectionViewFlowLayout()
     layout.scrollDirection = .vertical
-    layout.minimumInteritemSpacing = 3
-    layout.minimumLineSpacing = 3
+    layout.minimumInteritemSpacing = 8
+    layout.minimumLineSpacing = 8
+    layout.sectionInset = UIEdgeInsets(top: 0, left: 16, bottom: 20, right: 16)
     collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
     super.init(nibName: nil, bundle: nil)
   }
@@ -1016,6 +1022,11 @@ private final class WatermarkGalleryViewController: UIViewController,
     filterControl.addTarget(self, action: #selector(filterChanged), for: .valueChanged)
     filterControl.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(filterControl)
+
+    countLabel.font = .systemFont(ofSize: 22, weight: .bold)
+    countLabel.textColor = .white
+    countLabel.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(countLabel)
 
     statusLabel.numberOfLines = 0
     statusLabel.textAlignment = .center
@@ -1068,6 +1079,8 @@ private final class WatermarkGalleryViewController: UIViewController,
       filterControl.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
       filterControl.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
       filterControl.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+      countLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 18),
+      countLabel.topAnchor.constraint(equalTo: filterControl.bottomAnchor, constant: 20),
       statusLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
       statusLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
       statusLabel.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
@@ -1075,7 +1088,7 @@ private final class WatermarkGalleryViewController: UIViewController,
       settingsButton.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 16),
       collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      collectionView.topAnchor.constraint(equalTo: filterControl.bottomAnchor, constant: 10),
+      collectionView.topAnchor.constraint(equalTo: countLabel.bottomAnchor, constant: 14),
       collectionView.bottomAnchor.constraint(equalTo: selectionBar.topAnchor),
       selectionBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       selectionBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -1174,12 +1187,12 @@ private final class WatermarkGalleryViewController: UIViewController,
     layout collectionViewLayout: UICollectionViewLayout,
     sizeForItemAt indexPath: IndexPath
   ) -> CGSize {
-    let width = (collectionView.bounds.width - 6) / 3
+    let width = (collectionView.bounds.width - 48) / 3
     return CGSize(width: width, height: width)
   }
 
   @objc private func closeGallery() {
-    dismiss(animated: true)
+    dismiss(animated: true, completion: onClose)
   }
 
   private func updateNavigationActions() {
@@ -1416,6 +1429,7 @@ private final class WatermarkGalleryViewController: UIViewController,
       preconditionFailure("The gallery filter index is invalid.")
     }
     collectionView.reloadData()
+    countLabel.text = "作品  \(filteredEntries.count)"
     selectedIdentifiers.formIntersection(Set(entries.map { $0.item.id }))
     if isSelecting { updateSelectionActions() }
     if hiddenLimitedItemCount > 0 && filteredEntries.isEmpty {
