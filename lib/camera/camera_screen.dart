@@ -8,7 +8,6 @@ import '../location/location_service.dart';
 import '../media/watermark_bridge.dart';
 import '../media/watermark_gallery_bridge.dart';
 import '../settings/watermark_settings.dart';
-import '../watermark/watermark_overlay.dart';
 import '../watermark/watermark_snapshot.dart';
 import 'camera_coordinator.dart';
 import 'hardware_capture_bridge.dart';
@@ -23,7 +22,7 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen> {
-  static const Color _accentColor = Color(0xFFC6F4D5);
+  static const Color _accentColor = Color(0xFFF3D47D);
   static const Color _recordingColor = Color(0xFFFF716B);
 
   late final CameraCoordinator _cameraCoordinator;
@@ -31,10 +30,8 @@ class _CameraScreenState extends State<CameraScreen> {
   late final WatermarkBridge _watermarkBridge;
   late final WatermarkGalleryBridge _galleryBridge;
   late final HardwareCaptureBridge _hardwareCaptureBridge;
-  late final Timer _previewClock;
   String? _locationText;
   LocationUnavailableException? _locationFailure;
-  WatermarkSnapshot? _previewSnapshot;
   bool _locationLoading = false;
   bool _locationAttempted = false;
   int _lastLocationGeneration = -1;
@@ -60,18 +57,11 @@ class _CameraScreenState extends State<CameraScreen> {
     widget.settings.addListener(_handleSettingsChanged);
     unawaited(_cameraCoordinator.initialize());
     unawaited(_refreshPendingMedia());
-    _previewClock = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(_refreshPreviewSnapshot);
-    });
   }
 
   @override
   void dispose() {
     _isShuttingDown = true;
-    _previewClock.cancel();
     widget.settings.removeListener(_handleSettingsChanged);
     _cameraCoordinator.removeListener(_handleCameraStateChanged);
     unawaited(
@@ -128,7 +118,6 @@ class _CameraScreenState extends State<CameraScreen> {
         _locationFailure = null;
         _locationLoading = false;
         _locationAttempted = true;
-        _refreshPreviewSnapshot();
       });
       _syncHardwareCapture();
       return;
@@ -138,7 +127,6 @@ class _CameraScreenState extends State<CameraScreen> {
       _locationText = null;
       _locationFailure = null;
       _locationAttempted = false;
-      _refreshPreviewSnapshot();
     });
     unawaited(_resolveLocation());
     _syncHardwareCapture();
@@ -158,7 +146,6 @@ class _CameraScreenState extends State<CameraScreen> {
         _locationText = location;
         _locationFailure = null;
         _locationAttempted = true;
-        _refreshPreviewSnapshot();
       });
       _syncHardwareCapture();
     } on LocationUnavailableException catch (error) {
@@ -169,7 +156,6 @@ class _CameraScreenState extends State<CameraScreen> {
         _locationText = null;
         _locationFailure = error;
         _locationAttempted = true;
-        _previewSnapshot = null;
       });
     } finally {
       if (mounted) {
@@ -177,19 +163,6 @@ class _CameraScreenState extends State<CameraScreen> {
         _syncHardwareCapture();
       }
     }
-  }
-
-  void _refreshPreviewSnapshot() {
-    final String? location = _locationText;
-    if (location == null || location.isEmpty) {
-      _previewSnapshot = null;
-      return;
-    }
-    _previewSnapshot = WatermarkSnapshot.capture(
-      capturedAt: DateTime.now(),
-      locationText: location,
-      customText: widget.settings.customText,
-    );
   }
 
   Future<void> _openSettings() async {
@@ -224,7 +197,6 @@ class _CameraScreenState extends State<CameraScreen> {
         _locationText = location;
         _locationFailure = null;
         _locationAttempted = true;
-        _refreshPreviewSnapshot();
       });
       return location;
     } on LocationUnavailableException catch (error) {
@@ -233,7 +205,6 @@ class _CameraScreenState extends State<CameraScreen> {
           _locationText = null;
           _locationFailure = error;
           _locationAttempted = true;
-          _previewSnapshot = null;
         });
       }
       rethrow;
@@ -416,10 +387,7 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
 
-    setState(() {
-      _mediaBusy = true;
-      _mediaMessage = '正在恢复上次未完成的媒体…';
-    });
+    setState(() => _mediaBusy = true);
     try {
       String? renderedPath = pending.renderedPath;
       if (pending.status == 'prepared') {
@@ -474,12 +442,11 @@ class _CameraScreenState extends State<CameraScreen> {
         } else if (pending.isNotEmpty && _mediaMessage == null) {
           _mediaMessage = '检测到未完成的水印媒体，可选择恢复保存。';
         } else if (pending.isEmpty &&
-            _mediaMessage?.startsWith('检测到未完成') == true) {
-          _mediaMessage = null;
-        } else if (pending.isEmpty &&
-            (_mediaMessage?.contains('saved_but_index_failed') == true ||
+            (_mediaMessage?.startsWith('检测到未完成') == true ||
+                _mediaMessage?.startsWith('成品已保存到系统照片') == true ||
+                _mediaMessage?.contains('saved_but_index_failed') == true ||
                 _mediaMessage?.contains('saved_but_cleanup_failed') == true)) {
-          _mediaMessage = '已修复媒体登记状态，成品仍保存在系统照片中。';
+          _mediaMessage = null;
         }
       });
     } on Object catch (error) {
@@ -551,18 +518,6 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() => _mediaMessage = message);
   }
 
-  String get _statusText => switch (_cameraCoordinator.state) {
-    CameraSessionState.idle => '准备相机…',
-    CameraSessionState.requestingPermission => '请求相机权限…',
-    CameraSessionState.initializing => '正在启动相机…',
-    CameraSessionState.ready => '相机已就绪',
-    CameraSessionState.recording => '录像中',
-    CameraSessionState.processing => '正在处理媒体…',
-    CameraSessionState.interrupted => '相机已暂停，返回后正在恢复',
-    CameraSessionState.error => '相机暂不可用',
-    CameraSessionState.disposed => '相机已关闭',
-  };
-
   String? get _visibleError {
     final String? cameraError = _cameraCoordinator.cameraErrorText;
     if (cameraError != null) {
@@ -601,7 +556,7 @@ class _CameraScreenState extends State<CameraScreen> {
           : null,
       style: IconButton.styleFrom(
         fixedSize: const Size(54, 54),
-        backgroundColor: const Color(0xFF1E292A),
+        backgroundColor: const Color(0xFF242424),
         foregroundColor: canSwitch ? Colors.white : Colors.white38,
         shape: const CircleBorder(),
       ),
@@ -630,52 +585,45 @@ class _CameraScreenState extends State<CameraScreen> {
           .toList(growable: false),
       child: Container(
         height: 42,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        width: 42,
+        alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: const Color(0xD9131A1B),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white24),
+          color: const Color(0xFF252525),
+          shape: BoxShape.circle,
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(
-              mode == FlashMode.off
-                  ? Icons.flash_off_outlined
-                  : Icons.flash_on_outlined,
-              color: enabled ? _accentColor : Colors.white38,
-              size: 19,
-            ),
-            const SizedBox(width: 7),
-            Text(
-              unavailableReason == null ? _flashLabel(mode) : '不可用',
-              style: TextStyle(
-                color: enabled ? Colors.white : Colors.white38,
-                fontSize: 12,
-              ),
-            ),
-          ],
+        child: Icon(
+          mode == FlashMode.off
+              ? Icons.flash_off_rounded
+              : Icons.flash_on_rounded,
+          color: enabled ? _accentColor : Colors.white38,
+          size: 22,
         ),
       ),
     );
   }
 
   Widget _buildCaptureModeControl(bool canChangeMode) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: <Widget>[
-        _buildCaptureModeOption(
-          mode: CameraCaptureMode.photo,
-          label: '拍照',
-          canChangeMode: canChangeMode,
-        ),
-        const SizedBox(width: 32),
-        _buildCaptureModeOption(
-          mode: CameraCaptureMode.video,
-          label: '录像',
-          canChangeMode: canChangeMode,
-        ),
-      ],
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF242424),
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          _buildCaptureModeOption(
+            mode: CameraCaptureMode.video,
+            label: '视频',
+            canChangeMode: canChangeMode,
+          ),
+          _buildCaptureModeOption(
+            mode: CameraCaptureMode.photo,
+            label: '照片',
+            canChangeMode: canChangeMode,
+          ),
+        ],
+      ),
     );
   }
 
@@ -690,34 +638,27 @@ class _CameraScreenState extends State<CameraScreen> {
       selected: selected,
       label: label,
       child: InkWell(
+        borderRadius: BorderRadius.circular(24),
         onTap: !canChangeMode || selected
             ? null
             : () => unawaited(_cameraCoordinator.setCaptureMode(mode)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 13),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Text(
-                label,
-                style: TextStyle(
-                  color: selected ? _accentColor : Colors.white54,
-                  fontSize: 15,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  letterSpacing: 1,
-                ),
-              ),
-              const SizedBox(height: 6),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                width: selected ? 18 : 0,
-                height: 2,
-                decoration: BoxDecoration(
-                  color: _accentColor,
-                  borderRadius: BorderRadius.circular(1),
-                ),
-              ),
-            ],
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: 76,
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFF3A3A3A) : Colors.transparent,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? _accentColor : Colors.white70,
+              fontSize: 15,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              letterSpacing: 1,
+            ),
           ),
         ),
       ),
@@ -799,45 +740,6 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  Widget _buildLocationIndicator() {
-    final String location =
-        _locationText ?? (_locationLoading ? '正在获取街道位置…' : '点击填写拍摄地点');
-    return Material(
-      color: const Color(0xE611191A),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: _openSettings,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-          child: Row(
-            children: <Widget>[
-              const Icon(
-                Icons.location_on_outlined,
-                color: _accentColor,
-                size: 17,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  location,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                ),
-              ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: Colors.white54,
-                size: 18,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildMediaMessage(String mediaMessage) {
     final ButtonStyle actionStyle = TextButton.styleFrom(
       foregroundColor: _accentColor,
@@ -904,85 +806,23 @@ class _CameraScreenState extends State<CameraScreen> {
       onPressed: onPressed,
       style: IconButton.styleFrom(
         fixedSize: const Size(42, 42),
-        backgroundColor: const Color(0xFF1D2829),
+        backgroundColor: const Color(0xFF242424),
         foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: const CircleBorder(),
       ),
       icon: Icon(icon, size: 20),
     );
   }
 
   Widget _buildTopBar(CameraSessionState cameraState) {
-    final Color stateColor = switch (cameraState) {
-      CameraSessionState.ready => _accentColor,
-      CameraSessionState.recording => _recordingColor,
-      CameraSessionState.error => const Color(0xFFFFC56E),
-      _ => Colors.white54,
-    };
     return Row(
       children: <Widget>[
-        Container(
-          width: 42,
-          height: 42,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: _accentColor,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Icon(
-            Icons.center_focus_strong,
-            color: Color(0xFF12201A),
-            size: 22,
-          ),
-        ),
-        const SizedBox(width: 11),
-        Expanded(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              const Text(
-                'PROOFSHOT',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Row(
-                children: <Widget>[
-                  Container(
-                    width: 5,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: stateColor,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      _statusText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white60,
-                        fontSize: 10,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+        const Spacer(),
         _buildFlashControl(cameraState == CameraSessionState.ready),
         const SizedBox(width: 8),
         _buildTopAction(
-          tooltip: '水印设置',
-          icon: Icons.tune_rounded,
+          tooltip: '设置',
+          icon: Icons.more_horiz_rounded,
           onPressed: _openSettings,
         ),
       ],
@@ -999,11 +839,11 @@ class _CameraScreenState extends State<CameraScreen> {
       onPressed: enabled ? _openGallery : null,
       style: IconButton.styleFrom(
         fixedSize: const Size(54, 54),
-        backgroundColor: const Color(0xFF1E292A),
+        backgroundColor: const Color(0xFF242424),
         foregroundColor: Colors.white,
         shape: const CircleBorder(),
       ),
-      icon: const Icon(Icons.grid_view_rounded, size: 23),
+      icon: const Icon(Icons.photo_library_outlined, size: 23),
     );
   }
 
@@ -1014,86 +854,53 @@ class _CameraScreenState extends State<CameraScreen> {
     final bool canChangeMode = cameraState == CameraSessionState.ready;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1516),
+      backgroundColor: Colors.black,
       body: SafeArea(
         child: Column(
           children: <Widget>[
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
               child: _buildTopBar(cameraState),
             ),
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: <Widget>[
-                      ColoredBox(
-                        color: Colors.black,
-                        child:
-                            controller != null && controller.value.isInitialized
-                            ? Center(
-                                child: CameraPreview(
-                                  controller,
-                                  child: _previewSnapshot == null
-                                      ? const SizedBox.expand()
-                                      : WatermarkOverlay(
-                                          snapshot: _previewSnapshot!,
-                                        ),
-                                ),
-                              )
-                            : const SizedBox.expand(),
-                      ),
-                      IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.white12),
-                          ),
-                        ),
-                      ),
-                      if (_visibleError case final String errorText)
-                        Positioned(
-                          top: 16,
-                          left: 16,
-                          right: 16,
-                          child: _StatusCard(
-                            message: errorText,
-                            actionLabel: cameraState == CameraSessionState.error
-                                ? '重试相机'
-                                : '填写地点',
-                            onAction: cameraState == CameraSessionState.error
-                                ? _retryCamera
-                                : _openSettings,
-                          ),
-                        ),
-                      if (_mediaMessage case final String mediaMessage)
-                        Positioned(
-                          top: _visibleError == null ? 16 : 114,
-                          left: 16,
-                          right: 16,
-                          child: _buildMediaMessage(mediaMessage),
-                        ),
+              child: ColoredBox(
+                color: Colors.black,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: <Widget>[
+                    if (controller != null && controller.value.isInitialized)
+                      Center(child: CameraPreview(controller)),
+                    if (_visibleError case final String errorText)
                       Positioned(
-                        left: 14,
-                        right: 14,
-                        bottom: 14,
-                        child: _buildLocationIndicator(),
+                        top: 16,
+                        left: 16,
+                        right: 16,
+                        child: _StatusCard(
+                          message: errorText,
+                          actionLabel: cameraState == CameraSessionState.error
+                              ? '重试相机'
+                              : '填写地点',
+                          onAction: cameraState == CameraSessionState.error
+                              ? _retryCamera
+                              : _openSettings,
+                        ),
                       ),
-                    ],
-                  ),
+                    if (_mediaMessage case final String mediaMessage)
+                      Positioned(
+                        top: _visibleError == null ? 16 : 114,
+                        left: 16,
+                        right: 16,
+                        child: _buildMediaMessage(mediaMessage),
+                      ),
+                  ],
                 ),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 5, 24, 16),
+              padding: const EdgeInsets.fromLTRB(30, 24, 30, 18),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  _buildCaptureModeControl(canChangeMode),
-                  const SizedBox(height: 14),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: <Widget>[
@@ -1102,6 +909,8 @@ class _CameraScreenState extends State<CameraScreen> {
                       _buildCameraSwitchControl(canChangeMode),
                     ],
                   ),
+                  const SizedBox(height: 22),
+                  _buildCaptureModeControl(canChangeMode),
                 ],
               ),
             ),
