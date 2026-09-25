@@ -125,12 +125,12 @@ convergence_policy:
   - 约束：未写入相册绝不提示成功；相册已写入但索引失败时报告两种状态并修复索引，不重复保存；临时任务与 UTF-8 JSON 索引原子写入。
   - 验证：检查 add-only 权限、索引 schema、写入顺序和错误回调符号；Swift 编译由 task 6.1 云编译统一核对，恢复行为由用户真机验收。
 
-- [x] 4.4 实现“我的水印”图库浏览与播放。
+- [x] 4.4 实现“我的水印”图库浏览、横向分页和播放。
   - 依据：应用内水印媒体图库 Requirement；D-008；REF-007/011。
   - 读取：`design.md` D-008；`ios/Runner/WatermarkGallery.swift` 媒体索引；`lib/camera/camera_screen.dart`。
-  - 修改：`ios/Runner/WatermarkGallery.swift`、`ios/Runner/AppDelegate.swift`、`lib/camera/camera_screen.dart`、`ios/Runner/Info.plist`；新增 `openGallery` channel 方法，图库入口、readWrite/limited 授权、网格缩略图、筛选、照片详情、视频播放、刷新和空状态。
-  - 约束：只查询索引中的 ID，不把完整媒体传到 Dart；有限权限导致不可见时保留索引；照片云端下载失败有明确状态。
-  - 验证：检查 `openGallery`、`PHAsset.fetchAssets`、`PHImageManager`、`AVPlayerViewController` 和授权分支；Swift 编译由 task 6.1 云编译统一核对，操作由用户真机验收。
+  - 修改：`ios/Runner/WatermarkGallery.swift`、`ios/Runner/AppDelegate.swift`、`lib/camera/camera_screen.dart`、`ios/Runner/Info.plist`；新增 `openGallery` channel 方法，图库入口、readWrite/limited 授权、网格缩略图、筛选、照片/录像横向分页、照片缩放、视频播放、刷新和空状态。
+  - 约束：只查询索引中的 ID，不把完整媒体传到 Dart；分页数据遵从当前筛选结果；删除后切到相邻项目或返回网格；有限权限导致不可见时保留索引；照片云端下载失败有明确状态。
+  - 验证：检查 `openGallery`、`UIPageViewController`、`PHAsset.fetchAssets`、`PHImageManager`、`AVPlayerViewController` 和授权分支；Swift 编译由 task 6.1 云编译统一核对，滑动和操作由用户真机验收。
 
 - [x] 4.5 实现单项删除与索引同步。
   - 依据：应用内水印媒体图库 Requirement；D-008；REF-012。

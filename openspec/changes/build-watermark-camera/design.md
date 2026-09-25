@@ -42,7 +42,7 @@
 
 `ios/Runner/WatermarkGallery.swift` 用 PhotoKit/AVKit 提供原生图库页，由相机页“我的水印”按钮打开。仅显示 D-006 保存时登记的 `localIdentifier`：`Library/Application Support/proofshot/media-index.json` 为 UTF-8 JSON，schema `{version:1,items:[{id,kind,capturedAt}]}`，`kind` 仅 `photo|video`，按拍摄时间倒序；索引采用原子写入，未知版本/无效字段明确报错，不扫描用户整个相册，也不保存第二份完整媒体。相机保存只请求 add-only；第一次打开图库时请求 readWrite，接受 authorized 或 limited。Apple PhotoKit 会把应用新建资产自动加入有限访问集合。拒绝/受限时显示权限说明与系统设置入口，保持相机拍摄能力。
 
-图库使用 `PHAsset.fetchAssets(withLocalIdentifiers:)` 查询登记资产，异步按屏幕尺寸请求缩略图；网格只保留可视区域缩略图，不向 Dart MethodChannel 传完整媒体。照片详情用原生滚动/缩放视图，视频通过 `PHImageManager.requestPlayerItem` 和 `AVPlayerViewController` 播放；媒体在 iCloud 且当前不可取得时显示加载或明确错误。列表提供刷新及照片/视频筛选。仅当 readWrite 状态为 authorized 且 ID 查询为空，才判定资产已由用户在系统照片中删除并清理索引；limited 状态查询为空时保留索引并提示调整选择，避免把权限遮蔽误判为已删除。
+图库使用 `PHAsset.fetchAssets(withLocalIdentifiers:)` 查询登记资产，异步按屏幕尺寸请求缩略图；网格只保留可视区域缩略图，不向 Dart MethodChannel 传完整媒体。点选项目后进入与 iOS「照片」一致的横向分页详情，可在当前筛选结果内左右切换照片和录像，并显示当前位置计数；照片支持缩放/平移，录像通过 `PHImageManager.requestPlayerItem` 和 `AVPlayerViewController` 播放。删除当前项目后自动展示相邻项目，若已无项目则返回网格。媒体在 iCloud 且当前不可取得时显示加载或明确错误。列表提供刷新及照片/视频筛选。仅当 readWrite 状态为 authorized 且 ID 查询为空，才判定资产已由用户在系统照片中删除并清理索引；limited 状态查询为空时保留索引并提示调整选择，避免把权限遮蔽误判为已删除。
 
 每次仅删除用户点选且仍在本机索引中的一个资产。先显示应用确认框，说明“将从系统照片删除，若启用 iCloud 照片也可能同步删除”；确认后调用 `PHAssetChangeRequest.deleteAssets` 于 `PHPhotoLibrary.performChanges`，交由系统再次确认。只有 PhotoKit 回调成功且重新查询证实资产不可见才删除索引项；取消、拒绝、错误均保留索引并显示结果。若成功删除后索引原子写入失败，下次刷新将清理失效项。应用不删除其他来源的相册资产，不提供批量删除。
 

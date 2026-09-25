@@ -1088,11 +1088,10 @@ private final class WatermarkGalleryViewController: UIViewController,
     guard indexPath.item < filteredEntries.count else {
       preconditionFailure("The selected gallery item is out of range.")
     }
-    let entry = filteredEntries[indexPath.item]
-    let detail = WatermarkMediaDetailViewController(
+    let detail = WatermarkMediaPagerViewController(
       journal: journal,
-      item: entry.item,
-      asset: entry.asset
+      entries: filteredEntries,
+      initialIndex: indexPath.item
     ) { [weak self] in
       self?.reloadFromIndex()
     }
@@ -1225,21 +1224,180 @@ private final class WatermarkGalleryViewController: UIViewController,
   }
 }
 
+private final class WatermarkMediaPagerViewController: UIViewController,
+  UIPageViewControllerDataSource,
+  UIPageViewControllerDelegate
+{
+  private let journal: WatermarkMediaJournal
+  private let onChange: () -> Void
+  private let pageController: UIPageViewController
+  private var entries: [WatermarkGalleryEntry]
+  private var currentIndex: Int
+
+  init(
+    journal: WatermarkMediaJournal,
+    entries: [WatermarkGalleryEntry],
+    initialIndex: Int,
+    onChange: @escaping () -> Void
+  ) {
+    precondition(!entries.isEmpty && entries.indices.contains(initialIndex))
+    self.journal = journal
+    self.entries = entries
+    self.currentIndex = initialIndex
+    self.onChange = onChange
+    pageController = UIPageViewController(
+      transitionStyle: .scroll,
+      navigationOrientation: .horizontal
+    )
+    super.init(nibName: nil, bundle: nil)
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("WatermarkMediaPagerViewController does not support storyboard initialization.")
+  }
+
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    view.backgroundColor = .black
+    navigationItem.rightBarButtonItem = UIBarButtonItem(
+      title: "删除",
+      style: .plain,
+      target: self,
+      action: #selector(confirmDeleteCurrentItem)
+    )
+    navigationItem.rightBarButtonItem?.tintColor = .systemRed
+
+    pageController.dataSource = self
+    pageController.delegate = self
+    pageController.view.backgroundColor = .black
+    pageController.view.translatesAutoresizingMaskIntoConstraints = false
+    addChild(pageController)
+    view.addSubview(pageController.view)
+    NSLayoutConstraint.activate([
+      pageController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      pageController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      pageController.view.topAnchor.constraint(equalTo: view.topAnchor),
+      pageController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+    ])
+    pageController.didMove(toParent: self)
+    pageController.setViewControllers(
+      [makeDetailPage(at: currentIndex)],
+      direction: .forward,
+      animated: false
+    )
+    updateNavigationTitle()
+  }
+
+  func pageViewController(
+    _ pageViewController: UIPageViewController,
+    viewControllerBefore viewController: UIViewController
+  ) -> UIViewController? {
+    let index = index(of: viewController)
+    guard index > 0 else { return nil }
+    return makeDetailPage(at: index - 1)
+  }
+
+  func pageViewController(
+    _ pageViewController: UIPageViewController,
+    viewControllerAfter viewController: UIViewController
+  ) -> UIViewController? {
+    let index = index(of: viewController)
+    guard index + 1 < entries.count else { return nil }
+    return makeDetailPage(at: index + 1)
+  }
+
+  func pageViewController(
+    _ pageViewController: UIPageViewController,
+    didFinishAnimating finished: Bool,
+    previousViewControllers: [UIViewController],
+    transitionCompleted completed: Bool
+  ) {
+    guard completed, let visiblePage = pageViewController.viewControllers?.first else {
+      return
+    }
+    currentIndex = index(of: visiblePage)
+    updateNavigationTitle()
+  }
+
+  @objc private func confirmDeleteCurrentItem() {
+    guard let detail = pageController.viewControllers?.first
+      as? WatermarkMediaDetailViewController
+    else {
+      preconditionFailure("The current gallery page is not a media detail page.")
+    }
+    detail.confirmDelete()
+  }
+
+  private func makeDetailPage(at index: Int) -> WatermarkMediaDetailViewController {
+    guard entries.indices.contains(index) else {
+      preconditionFailure("The requested gallery page is out of range.")
+    }
+    let entry = entries[index]
+    return WatermarkMediaDetailViewController(
+      journal: journal,
+      item: entry.item,
+      asset: entry.asset
+    ) { [weak self] deletedIdentifier in
+      self?.handleDeletedItem(identifier: deletedIdentifier)
+    }
+  }
+
+  private func index(of viewController: UIViewController) -> Int {
+    guard let detail = viewController as? WatermarkMediaDetailViewController,
+          let index = entries.firstIndex(where: { $0.item.id == detail.mediaIdentifier })
+    else {
+      preconditionFailure("A gallery page is missing from the active media list.")
+    }
+    return index
+  }
+
+  private func updateNavigationTitle() {
+    navigationItem.title = "\(currentIndex + 1) / \(entries.count)"
+  }
+
+  private func handleDeletedItem(identifier: String) {
+    guard let deletedIndex = entries.firstIndex(where: { $0.item.id == identifier }),
+          let currentPage = pageController.viewControllers?.first
+            as? WatermarkMediaDetailViewController,
+          currentPage.mediaIdentifier == identifier
+    else {
+      preconditionFailure("The deleted gallery item is not the active media page.")
+    }
+    entries.remove(at: deletedIndex)
+    onChange()
+    guard !entries.isEmpty else {
+      navigationController?.popViewController(animated: true)
+      return
+    }
+
+    currentIndex = min(deletedIndex, entries.count - 1)
+    let direction: UIPageViewController.NavigationDirection =
+      deletedIndex < entries.count ? .forward : .reverse
+    pageController.setViewControllers(
+      [makeDetailPage(at: currentIndex)],
+      direction: direction,
+      animated: false
+    )
+    updateNavigationTitle()
+  }
+}
+
 private final class WatermarkMediaDetailViewController: UIViewController, UIScrollViewDelegate {
   private let journal: WatermarkMediaJournal
   private let item: WatermarkMediaIndexItem
   private let asset: PHAsset
-  private let onChange: () -> Void
+  private let onChange: (String) -> Void
   private let scrollView = UIScrollView()
   private let imageView = UIImageView()
   private let statusLabel = UILabel()
   private var imageRequestID: PHImageRequestID?
+  var mediaIdentifier: String { item.id }
 
   init(
     journal: WatermarkMediaJournal,
     item: WatermarkMediaIndexItem,
     asset: PHAsset,
-    onChange: @escaping () -> Void
+    onChange: @escaping (String) -> Void
   ) {
     self.journal = journal
     self.item = item
@@ -1256,14 +1414,6 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
     super.viewDidLoad()
     title = item.kind == "video" ? "水印视频" : "水印照片"
     view.backgroundColor = .black
-    navigationItem.rightBarButtonItem = UIBarButtonItem(
-      title: "删除",
-      style: .plain,
-      target: self,
-      action: #selector(confirmDelete)
-    )
-    navigationItem.rightBarButtonItem?.tintColor = .systemRed
-
     statusLabel.textColor = .white
     statusLabel.textAlignment = .center
     statusLabel.numberOfLines = 0
@@ -1365,7 +1515,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
     }
   }
 
-  @objc private func confirmDelete() {
+  func confirmDelete() {
     let confirmation = UIAlertController(
       title: "删除水印成品？",
       message: "将从系统照片删除此项目；若启用了 iCloud 照片，删除也可能同步到其他设备。",
@@ -1413,8 +1563,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
         do {
           try self.journal.removeFromIndex(id: self.item.id)
           self.statusLabel.text = "已从系统照片和应用图库删除。"
-          self.onChange()
-          self.navigationController?.popViewController(animated: true)
+          self.onChange(self.item.id)
         } catch {
           self.statusLabel.text = "系统照片已删除，应用索引将在下次刷新時清理：\(error.localizedDescription)"
         }
