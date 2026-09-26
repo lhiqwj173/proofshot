@@ -10,17 +10,19 @@ enum CameraCaptureMode { photo, video }
 /// A zoom shortcut offered by the camera zoom control.
 @immutable
 class CameraZoomStep {
-  const CameraZoomStep({required this.camera, required this.factor});
+  const CameraZoomStep({required this.factor});
 
-  /// The lens this step belongs to, or null when the current lens is kept.
-  final CameraDescription? camera;
-
-  /// The zoom factor relative to the widest reach of [camera].
+  /// The zoom factor relative to the wide angle lens of the back camera, for example `0.5` or `2`.
   final double factor;
 
   /// The factor the lens shows on its own, for example `1x` or `0.5x`.
-  String get label =>
-      '${factor % 1 == 0 ? factor.toInt().toString() : factor.toString()}x';
+  String get label {
+    final double rounded = (factor * 100).roundToDouble() / 100;
+    final String value = rounded % 1 == 0
+        ? rounded.toInt().toString()
+        : rounded.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '');
+    return '${value}x';
+  }
 }
 
 enum CameraSessionState {
@@ -52,8 +54,6 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   double _zoomLevel = 1;
   double? _queuedZoomLevel;
   bool _zoomDraining = false;
-  double? _pendingLensZoomFactor;
-  bool _lensZoomSwitching = false;
   Future<void> _operationTail = Future<void>.value();
   Future<void>? _shutdownFuture;
   int _generation = 0;
@@ -68,7 +68,6 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   FlashMode get flashMode => _flashMode;
   CameraController? get controller => _controller;
   CameraDescription? get selectedCamera => _selectedCamera;
-  bool get isLensZoomSwitching => _lensZoomSwitching;
   bool get canSwitchCamera => _hasCameraDirection(
     _selectedCamera?.lensDirection == CameraLensDirection.back
         ? CameraLensDirection.front
@@ -89,30 +88,23 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   bool get isBackCameraSelected =>
       _selectedCamera?.lensDirection == CameraLensDirection.back;
 
-  /// The zoom shown to the user, where `1` is the widest reach of the lens.
-  double get zoomFactor => _zoomLevel * _lensZoomFactor(_selectedCamera);
-  double get minimumZoomFactor =>
-      _minZoomLevel * _lensZoomFactor(_selectedCamera);
-  double get maximumZoomFactor =>
-      _maxZoomLevel * _lensZoomFactor(_selectedCamera);
+  /// The zoom shown to the user, where `1` is the wide angle lens of the back camera and `0.5`
+  /// the ultra wide angle lens of a device that hands off between the two lenses.
+  double get zoomFactor => _zoomLevel;
+  double get minimumZoomFactor => _minZoomLevel;
+  double get maximumZoomFactor => _maxZoomLevel;
 
   /// Zoom shortcuts for the selected back lens, ordered by reach.
   List<CameraZoomStep> get zoomSteps {
-    final CameraDescription? reference = _referenceBackCamera;
-    if (reference == null || !isBackCameraSelected) {
+    if (!isBackCameraSelected || _controller == null) {
       return const <CameraZoomStep>[];
     }
-    final CameraDescription? ultraWide = _backCameraOfType(
-      CameraLensType.ultraWide,
-    );
-    final bool hasSeparateUltraWide =
-        ultraWide != null && ultraWide.name != reference.name;
-    final double referenceFactor = _lensZoomFactor(reference);
+    final double widest = minimumZoomFactor;
+    final double maximum = maximumZoomFactor;
     return <CameraZoomStep>[
-      if (hasSeparateUltraWide)
-        CameraZoomStep(camera: ultraWide, factor: _lensZoomFactor(ultraWide)),
-      CameraZoomStep(camera: reference, factor: referenceFactor),
-      CameraZoomStep(camera: reference, factor: referenceFactor * 2),
+      if (widest < 1) CameraZoomStep(factor: widest),
+      const CameraZoomStep(factor: 1),
+      if (maximum >= 2) const CameraZoomStep(factor: 2),
     ];
   }
 
@@ -207,35 +199,19 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
-  /// Applies a zoom factor across the wide and ultra-wide lenses.
+  /// Applies a zoom factor on the selected lens, clamped to what it can reach.
   void setZoomFactor(double factor) {
     _ensureOpen();
     if (!factor.isFinite || factor <= 0) {
       throw ArgumentError.value(factor, 'factor', 'Zoom must be positive.');
     }
-    if (!_lensZoomSwitching &&
-        _state != CameraSessionState.ready &&
+    if (_state != CameraSessionState.ready &&
         _state != CameraSessionState.recording) {
       throw StateError('Zoom can only change while the camera is active.');
     }
-    final CameraDescription? targetCamera = _cameraForZoomFactor(factor);
-    if (_lensZoomSwitching ||
-        (_state == CameraSessionState.ready &&
-            targetCamera?.name != _selectedCamera?.name)) {
-      _pendingLensZoomFactor = factor;
-      if (!_lensZoomSwitching) {
-        _lensZoomSwitching = true;
-        unawaited(_run<void>(_drainLensZoomSwitch));
-      }
-      return;
-    }
-    _applyZoomOnSelectedLens(factor);
-  }
-
-  void _applyZoomOnSelectedLens(double factor) {
     final double level = math.min(
       _maxZoomLevel,
-      math.max(_minZoomLevel, factor / _lensZoomFactor(_selectedCamera)),
+      math.max(_minZoomLevel, factor),
     );
     if (level == _zoomLevel) {
       return;
@@ -244,66 +220,6 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
     _queuedZoomLevel = level;
     notifyListeners();
     unawaited(_drainZoomQueue());
-  }
-
-  Future<void> _drainLensZoomSwitch() async {
-    try {
-      while (_pendingLensZoomFactor != null) {
-        final double requested = _pendingLensZoomFactor!;
-        _pendingLensZoomFactor = null;
-        final CameraDescription targetCamera = _cameraForZoomFactor(requested)!;
-        if (targetCamera.name != _selectedCamera?.name) {
-          if (_state != CameraSessionState.ready) {
-            throw StateError('Lens can only switch while the camera is ready.');
-          }
-          _selectedCamera = targetCamera;
-          final bool installed = await _installController(
-            targetCamera,
-            enableAudio: false,
-            flashToRestore: FlashMode.off,
-          );
-          if (!installed) {
-            return;
-          }
-        }
-        final double latest = _pendingLensZoomFactor ?? requested;
-        _pendingLensZoomFactor = null;
-        if (_cameraForZoomFactor(latest)!.name != _selectedCamera?.name) {
-          _pendingLensZoomFactor = latest;
-          continue;
-        }
-        _applyZoomOnSelectedLens(latest);
-      }
-    } finally {
-      _lensZoomSwitching = false;
-      _pendingLensZoomFactor = null;
-    }
-  }
-
-  /// Switches to [step]'s lens when needed and applies its zoom factor.
-  Future<void> applyZoomStep(CameraZoomStep step) {
-    _ensureOpen();
-    return _run<void>(() async {
-      if (_state != CameraSessionState.ready) {
-        throw StateError(
-          'A zoom step can only change while the camera is ready.',
-        );
-      }
-      final CameraDescription? camera = step.camera;
-      if (camera != null && camera.name != _selectedCamera?.name) {
-        _selectedCamera = camera;
-        _setState(CameraSessionState.initializing);
-        final bool installed = await _installController(
-          camera,
-          enableAudio: false,
-          flashToRestore: FlashMode.off,
-        );
-        if (!installed) {
-          return;
-        }
-      }
-      setZoomFactor(step.factor);
-    });
   }
 
   Future<void> switchCamera() {
@@ -782,30 +698,9 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
     return null;
   }
 
-  CameraDescription? get _referenceBackCamera =>
-      _backCameraOfType(CameraLensType.wide) ??
-      _defaultCamera(_availableCameras);
-
-  CameraDescription? _cameraForZoomFactor(double factor) {
-    final CameraDescription? selected = _selectedCamera;
-    if (selected?.lensDirection != CameraLensDirection.back) {
-      return selected;
-    }
-    if (factor < 1) {
-      return _backCameraOfType(CameraLensType.ultraWide) ?? selected;
-    }
-    if (selected?.lensType == CameraLensType.ultraWide) {
-      return _referenceBackCamera;
-    }
-    return selected;
-  }
-
   bool _supportsFlash(CameraDescription? camera) =>
       camera?.lensDirection == CameraLensDirection.back &&
       camera?.lensType != CameraLensType.ultraWide;
-
-  double _lensZoomFactor(CameraDescription? camera) =>
-      camera?.lensType == CameraLensType.ultraWide ? 0.5 : 1;
 
   bool _hasCameraDirection(CameraLensDirection direction) {
     for (final CameraDescription camera in _availableCameras) {

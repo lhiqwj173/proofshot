@@ -128,6 +128,7 @@ extension CameraPlugin: CameraApi {
       guard let strongSelf = self else { return }
 
       let discoveryDevices: [AVCaptureDevice.DeviceType] = [
+        .builtInDualWideCamera,
         .builtInWideAngleCamera,
         .builtInTelephotoCamera,
         .builtInUltraWideCamera,
@@ -138,9 +139,23 @@ extension CameraPlugin: CameraApi {
         mediaType: .video,
         position: .unspecified)
 
+      // A virtual dual wide camera hands off between the ultra wide and wide angle lenses inside
+      // a single session, so changing zoom across that boundary never tears down the capture
+      // session. Prefer it over the physical lenses it replaces.
+      let hasVirtualBackCamera = devices.contains {
+        $0.deviceType == .builtInDualWideCamera && $0.position == .back
+      }
+
       var reply: [PlatformCameraDescription] = []
 
       for device in devices {
+        if hasVirtualBackCamera,
+          device.position == .back,
+          device.deviceType == .builtInWideAngleCamera
+            || device.deviceType == .builtInUltraWideCamera
+        {
+          continue
+        }
         let lensFacing = strongSelf.platformLensDirection(for: device)
         let lensType = strongSelf.platformLensType(for: device)
         let cameraDescription = PlatformCameraDescription(

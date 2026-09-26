@@ -53,6 +53,13 @@ protocol CaptureDevice: NSObjectProtocol {
   var minAvailableVideoZoomFactor: CGFloat { get }
   var videoZoomFactor: CGFloat { get set }
 
+  // Virtual device composition
+  /// The physical devices that provide the lenses of a virtual device. Empty for a physical device.
+  var flutterConstituentDevices: [CaptureDevice] { get }
+  /// The raw zoom factors at which a virtual device hands off to its next constituent device.
+  /// Empty for a physical device.
+  var flutterVirtualSwitchOverZoomFactors: [NSNumber] { get }
+
   // Video Stabilization
   func isVideoStabilizationModeSupported(_ videoStabilizationMode: AVCaptureVideoStabilizationMode)
     -> Bool
@@ -96,6 +103,10 @@ extension AVCaptureDevice: CaptureDevice {
   }
 
   var flutterFormats: [CaptureDeviceFormat] { formats }
+
+  var flutterConstituentDevices: [CaptureDevice] { constituentDevices }
+
+  var flutterVirtualSwitchOverZoomFactors: [NSNumber] { virtualDeviceSwitchOverVideoZoomFactors }
 
   func isVideoStabilizationModeSupported(_ videoStabilizationMode: AVCaptureVideoStabilizationMode)
     -> Bool

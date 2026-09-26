@@ -4,9 +4,9 @@ import 'package:proofshot/camera/camera_coordinator.dart';
 import 'package:proofshot/camera/zoom_control.dart';
 
 void main() {
-  const CameraZoomStep ultraWide = CameraZoomStep(camera: null, factor: 0.5);
-  const CameraZoomStep wide = CameraZoomStep(camera: null, factor: 1);
-  const CameraZoomStep doubleZoom = CameraZoomStep(camera: null, factor: 2);
+  const CameraZoomStep ultraWide = CameraZoomStep(factor: 0.5);
+  const CameraZoomStep wide = CameraZoomStep(factor: 1);
+  const CameraZoomStep doubleZoom = CameraZoomStep(factor: 2);
 
   Future<void> pumpControl(
     WidgetTester tester, {

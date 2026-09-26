@@ -584,32 +584,12 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   void _selectZoomStep(CameraZoomStep step) {
-    if (_cameraCoordinator.state != CameraSessionState.ready) {
+    final CameraSessionState state = _cameraCoordinator.state;
+    if (state != CameraSessionState.ready &&
+        state != CameraSessionState.recording) {
       return;
     }
-    unawaited(_applyZoomStep(step));
-  }
-
-  Future<void> _applyZoomStep(CameraZoomStep step) async {
-    try {
-      await _cameraCoordinator.applyZoomStep(step);
-    } on Object catch (error) {
-      _showMediaMessage('切换镜头失败：$error');
-    }
-  }
-
-  List<CameraZoomStep> _visibleZoomSteps() {
-    final List<CameraZoomStep> steps = _cameraCoordinator.zoomSteps;
-    if (_cameraCoordinator.state == CameraSessionState.ready) {
-      return steps;
-    }
-    final String? selectedName = _cameraCoordinator.selectedCamera?.name;
-    return steps
-        .where(
-          (CameraZoomStep step) =>
-              step.camera == null || step.camera?.name == selectedName,
-        )
-        .toList(growable: false);
+    _cameraCoordinator.setZoomFactor(step.factor);
   }
 
   Future<void> _openGallery() async {
@@ -1167,7 +1147,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Widget _buildControlPanel(CameraSessionState cameraState) {
     final bool canChangeMode = cameraState == CameraSessionState.ready;
-    final List<CameraZoomStep> steps = _visibleZoomSteps();
+    final List<CameraZoomStep> steps = _cameraCoordinator.zoomSteps;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
@@ -1175,7 +1155,7 @@ class _CameraScreenState extends State<CameraScreen> {
         children: <Widget>[
           if (steps.isNotEmpty)
             IgnorePointer(
-              ignoring: !_canZoom && !_cameraCoordinator.isLensZoomSwitching,
+              ignoring: !_canZoom,
               child: CameraZoomControl(
                 steps: steps,
                 factor: _cameraCoordinator.zoomFactor,

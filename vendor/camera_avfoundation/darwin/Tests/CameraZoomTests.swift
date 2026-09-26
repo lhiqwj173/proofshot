@@ -108,4 +108,63 @@ final class CameraZoomTests: XCTestCase {
 
     XCTAssertEqual(camera.minimumAvailableZoomFactor, targetZoom)
   }
+
+  /// Configures a mock as a dual wide virtual device whose widest constituent lens is the ultra
+  /// wide angle, as on an iPhone 11 and later.
+  private func makeDualWideVirtualDevice(_ mockDevice: MockCaptureDevice) {
+    let ultraWideDevice = MockCaptureDevice()
+    ultraWideDevice.deviceType = .builtInUltraWideCamera
+
+    mockDevice.flutterConstituentDevices = [ultraWideDevice]
+    mockDevice.flutterVirtualSwitchOverZoomFactors = [2]
+    mockDevice.minAvailableVideoZoomFactor = 1.0
+    mockDevice.maxAvailableVideoZoomFactor = 8.0
+  }
+
+  func testZoomFactors_areRelativeToTheWideAngleLensOfAVirtualDevice() {
+    let (camera, mockDevice) = createCamera()
+    makeDualWideVirtualDevice(mockDevice)
+
+    // Raw zoom factor 1.0 is the ultra wide angle lens, the wide angle lens starts at 2.0.
+    XCTAssertEqual(camera.minimumAvailableZoomFactor, 0.5)
+    XCTAssertEqual(camera.maximumAvailableZoomFactor, 4.0)
+  }
+
+  func testSetZoomLevel_scalesTheVirtualDeviceZoomLevelToTheDeviceZoomFactor() {
+    let (camera, mockDevice) = createCamera()
+    makeDualWideVirtualDevice(mockDevice)
+
+    var appliedZoom: CGFloat?
+    mockDevice.setVideoZoomFactorStub = { appliedZoom = $0 }
+
+    let expectation = expectation(description: "Call completed")
+
+    camera.setZoomLevel(0.5) { result in
+      let _ = self.assertSuccess(result)
+      expectation.fulfill()
+    }
+
+    waitForExpectations(timeout: 30)
+
+    XCTAssertEqual(appliedZoom, CGFloat(1.0))
+  }
+
+  func testSetZoomLevel_returnsError_forAZoomLevelBelowTheVirtualDeviceUltraWideAngleLens() {
+    let (camera, mockDevice) = createCamera()
+    makeDualWideVirtualDevice(mockDevice)
+
+    let expectation = expectation(description: "Call completed")
+
+    camera.setZoomLevel(0.25) { result in
+      switch result {
+      case .failure(let error as PigeonError):
+        XCTAssertEqual(error.code, "ZOOM_ERROR")
+      default:
+        XCTFail("Expected failure")
+      }
+      expectation.fulfill()
+    }
+
+    waitForExpectations(timeout: 30)
+  }
 }

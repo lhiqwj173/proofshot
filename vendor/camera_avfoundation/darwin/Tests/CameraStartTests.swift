@@ -35,4 +35,28 @@ final class CameraStartTests: XCTestCase {
     XCTAssertEqual(mockOutput.maxPhotoDimensions.width, 4032)
     XCTAssertEqual(mockOutput.maxPhotoDimensions.height, 3024)
   }
+
+  func testStart_selectsTheWideAngleLensOfAVirtualDevice() {
+    let ultraWideDevice = MockCaptureDevice()
+    ultraWideDevice.deviceType = .builtInUltraWideCamera
+
+    let captureDeviceMock = MockCaptureDevice()
+    captureDeviceMock.flutterConstituentDevices = [ultraWideDevice]
+    captureDeviceMock.flutterVirtualSwitchOverZoomFactors = [2]
+    captureDeviceMock.minAvailableVideoZoomFactor = 1.0
+    captureDeviceMock.maxAvailableVideoZoomFactor = 8.0
+
+    var appliedZoom: CGFloat?
+    captureDeviceMock.setVideoZoomFactorStub = { appliedZoom = $0 }
+
+    let configuration = CameraTestUtils.createTestCameraConfiguration()
+    configuration.videoCaptureDeviceFactory = { _ in captureDeviceMock }
+    let cam = CameraTestUtils.createTestCamera(configuration)
+
+    cam.start()
+
+    // The device starts at the ultra wide angle lens, so `start` has to move it to the wide angle
+    // lens that the reported zoom level 1.0 refers to.
+    XCTAssertEqual(appliedZoom, CGFloat(2.0))
+  }
 }

@@ -22,8 +22,33 @@ final class DefaultCamera: NSObject, Camera {
 
   var minimumExposureOffset: CGFloat { CGFloat(captureDevice.minExposureTargetBias) }
   var maximumExposureOffset: CGFloat { CGFloat(captureDevice.maxExposureTargetBias) }
-  var minimumAvailableZoomFactor: CGFloat { captureDevice.minAvailableVideoZoomFactor }
-  var maximumAvailableZoomFactor: CGFloat { captureDevice.maxAvailableVideoZoomFactor }
+  var minimumAvailableZoomFactor: CGFloat {
+    captureDevice.minAvailableVideoZoomFactor / zoomFactorBase
+  }
+  var maximumAvailableZoomFactor: CGFloat {
+    captureDevice.maxAvailableVideoZoomFactor / zoomFactorBase
+  }
+
+  /// The factor between the zoom levels reported to Dart and the device's raw `videoZoomFactor`.
+  ///
+  /// A virtual device such as the dual wide camera reports zoom relative to its widest constituent
+  /// lens: raw `1.0` is the ultra wide angle lens, and the wide angle lens takes over at the first
+  /// switch over factor (typically `2.0`). Dividing the raw factors by it reports zoom relative to
+  /// the wide angle lens, so `1.0` is the wide angle lens and `0.5` the ultra wide angle, the way
+  /// the system camera shows them. A dual camera (wide angle and telephoto, without an ultra wide
+  /// angle) reports a switch over factor too, but its raw `1.0` already is the wide angle lens,
+  /// hence the constituent device check.
+  private var zoomFactorBase: CGFloat {
+    let hasUltraWideConstituent = captureDevice.flutterConstituentDevices.contains {
+      $0.deviceType == .builtInUltraWideCamera
+    }
+    guard hasUltraWideConstituent,
+      let switchOverFactor = captureDevice.flutterVirtualSwitchOverZoomFactors.first
+    else {
+      return 1
+    }
+    return CGFloat(truncating: switchOverFactor)
+  }
 
   /// The queue on which `latestPixelBuffer` property is accessed.
   /// To avoid unnecessary contention, do not access `latestPixelBuffer` on the `captureSessionQueue`.
@@ -495,9 +520,31 @@ final class DefaultCamera: NSObject, Camera {
 
   func start() {
     configureMaxPhotoDimensions()
+    applyInitialZoom()
 
     videoCaptureSession.startRunning()
     audioCaptureSession.startRunning()
+  }
+
+  /// Moves the device to the zoom level that is reported to Dart as `1.0`.
+  ///
+  /// A virtual device starts at its widest constituent lens, which is the ultra wide angle on a
+  /// dual wide camera, so the wide angle lens that `1.0` refers to has to be selected explicitly.
+  /// This also clears a zoom factor left behind by a previous session on the same device.
+  private func applyInitialZoom() {
+    let initialZoom = zoomFactorBase
+    if initialZoom == captureDevice.videoZoomFactor {
+      return
+    }
+
+    do {
+      try captureDevice.lockForConfiguration()
+    } catch {
+      return
+    }
+
+    captureDevice.videoZoomFactor = initialZoom
+    captureDevice.unlockForConfiguration()
   }
 
   /// Configures `capturePhotoOutput` to allow capturing at the active format's highest supported
@@ -1036,15 +1083,22 @@ final class DefaultCamera: NSObject, Camera {
   func setZoomLevel(
     _ zoom: CGFloat, withCompletion completion: @escaping (Result<Void, any Error>) -> Void
   ) {
-    if zoom < captureDevice.minAvailableVideoZoomFactor
-      || zoom > captureDevice.maxAvailableVideoZoomFactor
+    let factorBase = zoomFactorBase
+    let minimumZoom = captureDevice.minAvailableVideoZoomFactor / factorBase
+    let maximumZoom = captureDevice.maxAvailableVideoZoomFactor / factorBase
+    let deviceZoom = zoom * factorBase
+    // Accept a zoom level within rounding distance of the reported bounds, so that converting a
+    // reported zoom level back to a device zoom cannot reject the bounds this camera reported.
+    let tolerance = max(captureDevice.maxAvailableVideoZoomFactor, 1) * 1e-6
+    if deviceZoom < captureDevice.minAvailableVideoZoomFactor - tolerance
+      || deviceZoom > captureDevice.maxAvailableVideoZoomFactor + tolerance
     {
       completion(
         .failure(
           PigeonError(
             code: "ZOOM_ERROR",
             message:
-              "Zoom level out of bounds (zoom level should be between \(captureDevice.minAvailableVideoZoomFactor) and \(captureDevice.maxAvailableVideoZoomFactor).",
+              "Zoom level out of bounds (zoom level should be between \(minimumZoom) and \(maximumZoom)).",
             details: nil)))
       return
     }
@@ -1056,7 +1110,9 @@ final class DefaultCamera: NSObject, Camera {
       return
     }
 
-    captureDevice.videoZoomFactor = zoom
+    captureDevice.videoZoomFactor = min(
+      captureDevice.maxAvailableVideoZoomFactor,
+      max(captureDevice.minAvailableVideoZoomFactor, deviceZoom))
     captureDevice.unlockForConfiguration()
     completion(.success(()))
   }
