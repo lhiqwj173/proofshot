@@ -746,8 +746,8 @@ class _CameraScreenState extends State<CameraScreen> {
           )
           .toList(growable: false),
       child: Container(
-        height: 42,
-        width: 42,
+        height: 48,
+        width: 48,
         alignment: Alignment.center,
         child: Icon(
           mode == FlashMode.off
@@ -758,7 +758,7 @@ class _CameraScreenState extends State<CameraScreen> {
                     ? Colors.white
                     : _cameraYellow
               : Colors.white38,
-          size: 22,
+          size: 24,
         ),
       ),
     );
@@ -967,12 +967,13 @@ class _CameraScreenState extends State<CameraScreen> {
       tooltip: tooltip,
       onPressed: onPressed,
       style: IconButton.styleFrom(
-        fixedSize: const Size(42, 42),
+        fixedSize: const Size(48, 48),
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
+        disabledForegroundColor: Colors.white38,
         shape: const CircleBorder(),
       ),
-      icon: Icon(icon, size: 20),
+      icon: Icon(icon, size: 26),
     );
   }
 
@@ -986,7 +987,7 @@ class _CameraScreenState extends State<CameraScreen> {
       tooltip: '在地图上确认地点',
       onPressed: enabled ? () => unawaited(_openLocationMap()) : null,
       style: IconButton.styleFrom(
-        fixedSize: const Size(42, 42),
+        fixedSize: const Size(48, 48),
         foregroundColor: Colors.white,
         disabledForegroundColor: Colors.white38,
         shape: const CircleBorder(),
@@ -999,7 +1000,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 color: Colors.white,
               ),
             )
-          : const Icon(Icons.my_location_rounded, size: 20),
+          : const Icon(Icons.gps_fixed_rounded, size: 25),
     );
   }
 
@@ -1008,23 +1009,20 @@ class _CameraScreenState extends State<CameraScreen> {
       children: <Widget>[
         const Spacer(),
         ClipRRect(
-          borderRadius: BorderRadius.circular(30),
+          borderRadius: BorderRadius.circular(32),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: const Color(0xB0222224),
-                borderRadius: BorderRadius.circular(30),
-                border: Border.all(color: const Color(0x24FFFFFF)),
+                color: const Color(0xD91C1C1E),
+                borderRadius: BorderRadius.circular(32),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   _buildFlashControl(cameraState == CameraSessionState.ready),
-                  const SizedBox(width: 2),
                   _buildLocationControl(cameraState),
-                  const SizedBox(width: 2),
                   _buildTopAction(
                     tooltip: '设置',
                     icon: Icons.more_horiz_rounded,
@@ -1264,7 +1262,7 @@ class _CameraScreenState extends State<CameraScreen> {
                   ),
                 ),
               Positioned(
-                top: safePadding.top + 30,
+                top: safePadding.top + 18,
                 left: 20,
                 right: 20,
                 child: _buildTopBar(cameraState),

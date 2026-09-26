@@ -67,6 +67,7 @@ class _CameraZoomControlState extends State<CameraZoomControl> {
   bool _dragging = false;
   double _dragStartFactor = 1;
   double _dragOctaves = 0;
+  double _dragTargetFactor = 1;
   double _longPressOffsetX = 0;
 
   void _startDrag() {
@@ -74,15 +75,24 @@ class _CameraZoomControlState extends State<CameraZoomControl> {
       _dragging = true;
       _dragStartFactor = widget.factor;
       _dragOctaves = 0;
+      _dragTargetFactor = widget.factor;
       _longPressOffsetX = 0;
     });
   }
 
   void _updateDrag(double deltaX) {
-    _dragOctaves += deltaX * _dragOctavesPerPixel;
-    widget.onFactorChanged(
-      _dragStartFactor * math.pow(2, _dragOctaves).toDouble(),
-    );
+    _dragOctaves -= deltaX * _dragOctavesPerPixel;
+    final double target = _dragStartFactor * math.pow(2, _dragOctaves);
+    final double smallestStep = widget.steps.first.factor;
+    setState(() {
+      _dragTargetFactor = target.clamp(
+        math.min(widget.minimumFactor, smallestStep),
+        widget.maximumFactor,
+      );
+    });
+    if (_dragTargetFactor >= widget.minimumFactor) {
+      widget.onFactorChanged(_dragTargetFactor);
+    }
   }
 
   void _updateLongPress(LongPressMoveUpdateDetails details) {
@@ -96,7 +106,17 @@ class _CameraZoomControlState extends State<CameraZoomControl> {
       return;
     }
     setState(() => _dragging = false);
-    final CameraZoomStep? step = snapZoomStep(widget.steps, widget.factor);
+    if (_dragTargetFactor < widget.minimumFactor) {
+      final CameraZoomStep widerStep = widget.steps.lastWhere(
+        (CameraZoomStep step) => step.factor < widget.minimumFactor,
+      );
+      if (_dragTargetFactor <=
+          math.sqrt(widerStep.factor * widget.minimumFactor)) {
+        widget.onStepSelected(widerStep);
+      }
+      return;
+    }
+    final CameraZoomStep? step = snapZoomStep(widget.steps, _dragTargetFactor);
     if (step != null) {
       widget.onStepSelected(step);
     }
@@ -149,8 +169,11 @@ class _CameraZoomControlState extends State<CameraZoomControl> {
                 ? _ZoomDial(
                     key: const ValueKey<String>('dial'),
                     steps: widget.steps,
-                    factor: widget.factor,
-                    minimumFactor: widget.minimumFactor,
+                    factor: _dragging ? _dragTargetFactor : widget.factor,
+                    minimumFactor: math.min(
+                      widget.minimumFactor,
+                      widget.steps.first.factor,
+                    ),
                     maximumFactor: widget.maximumFactor,
                   )
                 : _buildChips(),
