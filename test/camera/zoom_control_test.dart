@@ -33,17 +33,34 @@ void main() {
   }
 
   testWidgets('右滑 1x 可选中 0.5x 超广角', (WidgetTester tester) async {
+    double? requestedFactor;
     CameraZoomStep? selected;
     await pumpControl(
       tester,
-      onFactorChanged: (_) {},
+      onFactorChanged: (double factor) => requestedFactor = factor,
       onStepSelected: (CameraZoomStep step) => selected = step,
     );
 
-    await tester.drag(find.byType(CameraZoomControl), const Offset(100, 0));
+    await tester.drag(find.byType(CameraZoomControl), const Offset(180, 0));
     await tester.pumpAndSettle();
 
+    expect(requestedFactor, closeTo(0.5, 0.05));
     expect(selected, same(ultraWide));
+  });
+
+  testWidgets('右滑过程会持续传出 1x 以下的目标倍率', (WidgetTester tester) async {
+    final List<double> requestedFactors = <double>[];
+    await pumpControl(
+      tester,
+      onFactorChanged: requestedFactors.add,
+      onStepSelected: (_) {},
+    );
+
+    await tester.drag(find.byType(CameraZoomControl), const Offset(60, 0));
+    await tester.pumpAndSettle();
+
+    expect(requestedFactors, isNotEmpty);
+    expect(requestedFactors.last, lessThan(1));
   });
 
   testWidgets('左滑 1x 会放大', (WidgetTester tester) async {

@@ -90,9 +90,7 @@ class _CameraZoomControlState extends State<CameraZoomControl> {
         widget.maximumFactor,
       );
     });
-    if (_dragTargetFactor >= widget.minimumFactor) {
-      widget.onFactorChanged(_dragTargetFactor);
-    }
+    widget.onFactorChanged(_dragTargetFactor);
   }
 
   void _updateLongPress(LongPressMoveUpdateDetails details) {
@@ -106,16 +104,6 @@ class _CameraZoomControlState extends State<CameraZoomControl> {
       return;
     }
     setState(() => _dragging = false);
-    if (_dragTargetFactor < widget.minimumFactor) {
-      final CameraZoomStep widerStep = widget.steps.lastWhere(
-        (CameraZoomStep step) => step.factor < widget.minimumFactor,
-      );
-      if (_dragTargetFactor <=
-          math.sqrt(widerStep.factor * widget.minimumFactor)) {
-        widget.onStepSelected(widerStep);
-      }
-      return;
-    }
     final CameraZoomStep? step = snapZoomStep(widget.steps, _dragTargetFactor);
     if (step != null) {
       widget.onStepSelected(step);

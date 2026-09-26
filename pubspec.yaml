@@ -21,6 +21,7 @@ dependency_overrides:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  camera_platform_interface: 2.14.0
   flutter_lints: ^6.0.0
 
 flutter:

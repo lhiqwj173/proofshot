@@ -52,6 +52,8 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   double _zoomLevel = 1;
   double? _queuedZoomLevel;
   bool _zoomDraining = false;
+  double? _pendingLensZoomFactor;
+  bool _lensZoomSwitching = false;
   Future<void> _operationTail = Future<void>.value();
   Future<void>? _shutdownFuture;
   int _generation = 0;
@@ -66,6 +68,7 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   FlashMode get flashMode => _flashMode;
   CameraController? get controller => _controller;
   CameraDescription? get selectedCamera => _selectedCamera;
+  bool get isLensZoomSwitching => _lensZoomSwitching;
   bool get canSwitchCamera => _hasCameraDirection(
     _selectedCamera?.lensDirection == CameraLensDirection.back
         ? CameraLensDirection.front
@@ -204,12 +207,32 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
-  /// Applies a zoom factor on the selected lens while the user drags or pinches.
-  ///
-  /// The factor is relative to the widest reach of the current lens, so the
-  /// value is clamped instead of rejected. Platform writes are coalesced so a
-  /// continuous gesture never queues up more than the newest target.
+  /// Applies a zoom factor across the wide and ultra-wide lenses.
   void setZoomFactor(double factor) {
+    _ensureOpen();
+    if (!factor.isFinite || factor <= 0) {
+      throw ArgumentError.value(factor, 'factor', 'Zoom must be positive.');
+    }
+    if (!_lensZoomSwitching &&
+        _state != CameraSessionState.ready &&
+        _state != CameraSessionState.recording) {
+      throw StateError('Zoom can only change while the camera is active.');
+    }
+    final CameraDescription? targetCamera = _cameraForZoomFactor(factor);
+    if (_lensZoomSwitching ||
+        (_state == CameraSessionState.ready &&
+            targetCamera?.name != _selectedCamera?.name)) {
+      _pendingLensZoomFactor = factor;
+      if (!_lensZoomSwitching) {
+        _lensZoomSwitching = true;
+        unawaited(_run<void>(_drainLensZoomSwitch));
+      }
+      return;
+    }
+    _applyZoomOnSelectedLens(factor);
+  }
+
+  void _applyZoomOnSelectedLens(double factor) {
     final double level = math.min(
       _maxZoomLevel,
       math.max(_minZoomLevel, factor / _lensZoomFactor(_selectedCamera)),
@@ -221,6 +244,40 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
     _queuedZoomLevel = level;
     notifyListeners();
     unawaited(_drainZoomQueue());
+  }
+
+  Future<void> _drainLensZoomSwitch() async {
+    try {
+      while (_pendingLensZoomFactor != null) {
+        final double requested = _pendingLensZoomFactor!;
+        _pendingLensZoomFactor = null;
+        final CameraDescription targetCamera = _cameraForZoomFactor(requested)!;
+        if (targetCamera.name != _selectedCamera?.name) {
+          if (_state != CameraSessionState.ready) {
+            throw StateError('Lens can only switch while the camera is ready.');
+          }
+          _selectedCamera = targetCamera;
+          final bool installed = await _installController(
+            targetCamera,
+            enableAudio: false,
+            flashToRestore: FlashMode.off,
+          );
+          if (!installed) {
+            return;
+          }
+        }
+        final double latest = _pendingLensZoomFactor ?? requested;
+        _pendingLensZoomFactor = null;
+        if (_cameraForZoomFactor(latest)!.name != _selectedCamera?.name) {
+          _pendingLensZoomFactor = latest;
+          continue;
+        }
+        _applyZoomOnSelectedLens(latest);
+      }
+    } finally {
+      _lensZoomSwitching = false;
+      _pendingLensZoomFactor = null;
+    }
   }
 
   /// Switches to [step]'s lens when needed and applies its zoom factor.
@@ -578,14 +635,27 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
         _queuedZoomLevel = null;
         try {
           await controller.setZoomLevel(target);
-        } on CameraException {
+        } on CameraException catch (error) {
+          if (identical(_controller, controller)) {
+            _recordCameraException(error);
+            rethrow;
+          }
           return;
         } on StateError {
+          if (identical(_controller, controller)) {
+            rethrow;
+          }
           return;
         }
       }
     } finally {
       _zoomDraining = false;
+      if (_queuedZoomLevel != null &&
+          _controller?.value.isInitialized == true &&
+          (_state == CameraSessionState.ready ||
+              _state == CameraSessionState.recording)) {
+        unawaited(_drainZoomQueue());
+      }
     }
   }
 
@@ -715,6 +785,20 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   CameraDescription? get _referenceBackCamera =>
       _backCameraOfType(CameraLensType.wide) ??
       _defaultCamera(_availableCameras);
+
+  CameraDescription? _cameraForZoomFactor(double factor) {
+    final CameraDescription? selected = _selectedCamera;
+    if (selected?.lensDirection != CameraLensDirection.back) {
+      return selected;
+    }
+    if (factor < 1) {
+      return _backCameraOfType(CameraLensType.ultraWide) ?? selected;
+    }
+    if (selected?.lensType == CameraLensType.ultraWide) {
+      return _referenceBackCamera;
+    }
+    return selected;
+  }
 
   bool _supportsFlash(CameraDescription? camera) =>
       camera?.lensDirection == CameraLensDirection.back &&
