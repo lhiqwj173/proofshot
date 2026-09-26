@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import '../design/app_palette.dart';
 import '../location/location_service.dart';
+import '../location/location_map_picker.dart';
 import '../media/watermark_bridge.dart';
 import '../media/watermark_gallery_bridge.dart';
 import '../settings/watermark_settings.dart';
@@ -33,6 +35,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
   late final CameraCoordinator _cameraCoordinator;
   late final LocationService _locationService;
+  late final LocationMapPicker _locationMapPicker;
   late final WatermarkBridge _watermarkBridge;
   late final WatermarkGalleryBridge _galleryBridge;
   late final HardwareCaptureBridge _hardwareCaptureBridge;
@@ -60,6 +63,7 @@ class _CameraScreenState extends State<CameraScreen> {
     _cameraCoordinator = CameraCoordinator()
       ..addListener(_handleCameraStateChanged);
     _locationService = LocationService();
+    _locationMapPicker = LocationMapPicker();
     _locationText = widget.settings.activeLocation;
     _watermarkBridge = WatermarkBridge();
     _galleryBridge = WatermarkGalleryBridge();
@@ -133,9 +137,10 @@ class _CameraScreenState extends State<CameraScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '已更新地点：${location.text}（定位精度约 ${location.accuracyMeters.ceil()} 米）',
+              '已更新地点：${location.text}（坐标误差约 ${location.accuracyMeters.ceil()} 米；门牌请核对）',
             ),
-            duration: const Duration(seconds: 2),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(label: '修改地点', onPressed: _openSettings),
           ),
         );
       }
@@ -144,6 +149,85 @@ class _CameraScreenState extends State<CameraScreen> {
         return;
       }
       setState(() => _locationFailure = error);
+    } finally {
+      if (mounted) {
+        setState(() => _locationLoading = false);
+        _syncHardwareCapture();
+      }
+    }
+  }
+
+  Future<void> _openLocationMap() async {
+    if (_locationLoading ||
+        _isShuttingDown ||
+        _settingsOpen ||
+        _galleryOpen ||
+        _cameraCoordinator.state != CameraSessionState.ready) {
+      return;
+    }
+    setState(() {
+      _locationLoading = true;
+      _locationFailure = null;
+    });
+    _syncHardwareCapture();
+    try {
+      final SelectedMapCoordinate? selected = await _locationMapPicker.open();
+      if (selected == null || !mounted || _isShuttingDown) {
+        return;
+      }
+      final String suggested = await _locationService.resolveSelectedCoordinate(
+        selected.latitude,
+        selected.longitude,
+      );
+      if (!mounted || _isShuttingDown) {
+        return;
+      }
+      String edited = suggested;
+      final String? confirmed = await showDialog<String>(
+        context: context,
+        builder: (BuildContext dialogContext) => AlertDialog(
+          title: const Text('确认水印地点'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const Text('请核对地图选点对应的地址。门牌不准确时可直接修改。'),
+              const SizedBox(height: 16),
+              TextFormField(
+                initialValue: suggested,
+                onChanged: (String value) => edited = value,
+                maxLength: 40,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: '水印地点'),
+              ),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () {
+                final String value = edited.trim();
+                if (value.isEmpty) {
+                  return;
+                }
+                Navigator.of(dialogContext).pop(value);
+              },
+              child: const Text('使用此地点'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != null && mounted && !_isShuttingDown) {
+        await widget.settings.useAutomaticLocation(confirmed);
+      }
+    } on LocationUnavailableException catch (error) {
+      if (mounted) {
+        setState(() => _locationFailure = error);
+      }
+    } on PlatformException catch (error) {
+      _showMediaMessage('地图选点失败：${error.code} ${error.message ?? ''}');
     } finally {
       if (mounted) {
         setState(() => _locationLoading = false);
@@ -231,6 +315,7 @@ class _CameraScreenState extends State<CameraScreen> {
     if (_cameraCoordinator.state != CameraSessionState.ready ||
         _cameraCoordinator.captureMode != CameraCaptureMode.photo ||
         _locationText == null ||
+        _locationLoading ||
         _mediaBusy ||
         _isShuttingDown ||
         _settingsOpen ||
@@ -254,7 +339,9 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _startVideoRecording() async {
-    if (_cameraCoordinator.state != CameraSessionState.ready || _mediaBusy) {
+    if (_cameraCoordinator.state != CameraSessionState.ready ||
+        _mediaBusy ||
+        _locationLoading) {
       return;
     }
     try {
@@ -564,6 +651,7 @@ class _CameraScreenState extends State<CameraScreen> {
         _cameraCoordinator.state == CameraSessionState.ready &&
         _cameraCoordinator.captureMode == CameraCaptureMode.photo &&
         _locationText != null &&
+        !_locationLoading &&
         !_mediaBusy &&
         !_settingsOpen &&
         !_galleryOpen;
@@ -759,7 +847,8 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget _buildCaptureButton(CameraSessionState cameraState) {
     final bool isRecording = cameraState == CameraSessionState.recording;
     final bool isReady = cameraState == CameraSessionState.ready;
-    final bool canCapture = isReady && _locationText != null && !_mediaBusy;
+    final bool canCapture =
+        isReady && _locationText != null && !_mediaBusy && !_locationLoading;
     final VoidCallback? onPressed = isRecording
         ? () => unawaited(_stopVideoRecording())
         : !canCapture
@@ -912,8 +1001,8 @@ class _CameraScreenState extends State<CameraScreen> {
         !_settingsOpen &&
         !_galleryOpen;
     return IconButton(
-      tooltip: '刷新定位',
-      onPressed: enabled ? () => unawaited(_refreshLocation()) : null,
+      tooltip: '在地图上确认地点',
+      onPressed: enabled ? () => unawaited(_openLocationMap()) : null,
       style: IconButton.styleFrom(
         fixedSize: const Size(42, 42),
         foregroundColor: Colors.white,
@@ -936,25 +1025,32 @@ class _CameraScreenState extends State<CameraScreen> {
     return Row(
       children: <Widget>[
         const Spacer(),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          decoration: BoxDecoration(
-            color: AppPalette.translucentPill,
-            borderRadius: BorderRadius.circular(28),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              _buildFlashControl(cameraState == CameraSessionState.ready),
-              const SizedBox(width: 2),
-              _buildLocationControl(cameraState),
-              const SizedBox(width: 2),
-              _buildTopAction(
-                tooltip: '设置',
-                icon: Icons.more_horiz_rounded,
-                onPressed: _locationLoading ? null : _openSettings,
+        ClipRRect(
+          borderRadius: BorderRadius.circular(30),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xB0222224),
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: const Color(0x24FFFFFF)),
               ),
-            ],
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  _buildFlashControl(cameraState == CameraSessionState.ready),
+                  const SizedBox(width: 2),
+                  _buildLocationControl(cameraState),
+                  const SizedBox(width: 2),
+                  _buildTopAction(
+                    tooltip: '设置',
+                    icon: Icons.more_horiz_rounded,
+                    onPressed: _locationLoading ? null : _openSettings,
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ],

@@ -792,7 +792,7 @@ final class WatermarkBridge {
         snapshot.customText,
         in: context,
         canvasSize: size,
-        centerY: 0.71,
+        centerY: 0.63,
         baseFontSize: shortSide * 0.032,
         maximumWidth: maximumWidth,
         weight: .medium,
@@ -803,7 +803,7 @@ final class WatermarkBridge {
       snapshot.timeText,
       in: context,
       canvasSize: size,
-      centerY: 0.80,
+      centerY: 0.72,
       baseFontSize: shortSide * 0.14,
       maximumWidth: maximumWidth,
       weight: .semibold,
@@ -813,7 +813,7 @@ final class WatermarkBridge {
       snapshot,
       in: context,
       canvasSize: size,
-      centerY: 0.91,
+      centerY: 0.84,
       baseFontSize: shortSide * 0.035,
       maximumWidth: maximumWidth
     )

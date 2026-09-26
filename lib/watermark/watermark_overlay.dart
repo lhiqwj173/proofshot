@@ -7,9 +7,9 @@ import 'watermark_snapshot.dart';
 /// Normalized positions and sizes shared with the native media renderer.
 abstract final class WatermarkLayout {
   static const double safeMargin = 0.03;
-  static const double customCenterY = 0.71;
-  static const double timeCenterY = 0.80;
-  static const double metadataCenterY = 0.91;
+  static const double customCenterY = 0.63;
+  static const double timeCenterY = 0.72;
+  static const double metadataCenterY = 0.84;
   static const double timeFontSizeOfShortSide = 0.14;
   static const double metadataFontSizeOfShortSide = 0.035;
   static const double customFontSizeOfShortSide = 0.032;

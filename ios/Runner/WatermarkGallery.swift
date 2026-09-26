@@ -1681,13 +1681,24 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
       loadPhoto()
     } else {
       let playButton = UIButton(type: .system)
-      playButton.setTitle("播放视频", for: .normal)
-      playButton.titleLabel?.font = .systemFont(ofSize: 20, weight: .semibold)
+      imageView.contentMode = .scaleAspectFit
+      imageView.translatesAutoresizingMaskIntoConstraints = false
+      view.addSubview(imageView)
+      playButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+      playButton.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+      playButton.layer.cornerRadius = 36
+      playButton.accessibilityLabel = "播放视频"
       playButton.tintColor = .white
       playButton.addTarget(self, action: #selector(playVideo), for: .touchUpInside)
       playButton.translatesAutoresizingMaskIntoConstraints = false
       view.addSubview(playButton)
       NSLayoutConstraint.activate([
+        imageView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+        imageView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+        imageView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+        imageView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+        playButton.widthAnchor.constraint(equalToConstant: 72),
+        playButton.heightAnchor.constraint(equalToConstant: 72),
         playButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
         playButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         statusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -1695,6 +1706,14 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
         statusLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
         statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24),
       ])
+      loadVideoPoster()
+    }
+    view.bringSubviewToFront(statusLabel)
+  }
+
+  deinit {
+    if let imageRequestID {
+      PHImageManager.default().cancelImageRequest(imageRequestID)
     }
   }
 
@@ -1743,6 +1762,32 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
         playerController.player = AVPlayer(playerItem: playerItem)
         self.present(playerController, animated: true) {
           playerController.player?.play()
+        }
+      }
+    }
+  }
+
+  private func loadVideoPoster() {
+    statusLabel.text = "正在读取视频缩略图…"
+    let options = PHImageRequestOptions()
+    options.deliveryMode = .highQualityFormat
+    options.resizeMode = .fast
+    options.isNetworkAccessAllowed = true
+    imageRequestID = PHImageManager.default().requestImage(
+      for: asset,
+      targetSize: CGSize(width: 1600, height: 1600),
+      contentMode: .aspectFit,
+      options: options
+    ) { [weak self] image, info in
+      DispatchQueue.main.async {
+        guard let self else { return }
+        if let image {
+          self.imageView.image = image
+          self.statusLabel.text = nil
+        } else if let error = info?[PHImageErrorKey] as? Error {
+          self.statusLabel.text = "视频缩略图读取失败：\(error.localizedDescription)"
+        } else {
+          self.statusLabel.text = "视频缩略图暂时无法读取，请检查网络或 iCloud 状态。"
         }
       }
     }

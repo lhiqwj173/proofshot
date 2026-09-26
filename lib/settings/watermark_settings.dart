@@ -255,7 +255,7 @@ class _WatermarkSettingsPageState extends State<WatermarkSettingsPage> {
                   ),
                   const SizedBox(height: 10),
                   const Text(
-                    '点取景页右上角的定位按钮才会刷新。地点会实时显示在取景画面，并写入照片或视频。',
+                    '点取景页右上角的定位按钮可在地图上确认地点。地点会实时显示在取景画面，并写入照片或视频。',
                     style: TextStyle(
                       color: AppPalette.secondaryText,
                       fontSize: 13,

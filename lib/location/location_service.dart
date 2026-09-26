@@ -89,7 +89,7 @@ class LocationUnavailableException implements Exception {
       LocationUnavailableReason.invalidCoordinates => '定位返回了无效坐标，请重试或手动填写地点。',
       LocationUnavailableReason.invalidAccuracy => '定位没有返回有效精度，请重试或手动填写地点。',
       LocationUnavailableReason.inaccuratePosition =>
-        '当前定位误差约 ${accuracyMeters!.ceil()} 米，超过 100 米，请到开阔处刷新或手动填写地点。',
+        '当前定位误差约 ${accuracyMeters!.ceil()} 米，超过 30 米，请到开阔处刷新或手动填写地点。',
       LocationUnavailableReason.reducedAccuracy =>
         '系统只允许模糊位置，请在系统设置中开启“精确位置”后刷新。',
       LocationUnavailableReason.precisionUnknown => '无法确认系统定位精度，请检查定位权限后重试。',
@@ -118,7 +118,7 @@ class LocationService {
 
   static const Duration _maximumPositionAge = Duration(seconds: 60);
   static const Duration _operationTimeout = Duration(seconds: 20);
-  static const double _maximumHorizontalAccuracyMeters = 100;
+  static const double _maximumHorizontalAccuracyMeters = 30;
 
   final Geocoding _geocoding;
 
@@ -178,14 +178,7 @@ class LocationService {
       );
     }
 
-    final Position position = await _withLocationTimeout<Position>(
-      Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          timeLimit: _operationTimeout,
-        ),
-      ),
-    );
+    final Position position = await _waitForPrecisePosition();
     final DateTime positionTime = position.timestamp.toLocal();
     final Duration positionAge = DateTime.now().difference(positionTime);
     if (positionAge.isNegative || positionAge > _maximumPositionAge) {
@@ -205,12 +198,23 @@ class LocationService {
         accuracyMeters: horizontalAccuracy,
       );
     }
-    if (!position.latitude.isFinite ||
-        !position.longitude.isFinite ||
-        position.latitude < -90 ||
-        position.latitude > 90 ||
-        position.longitude < -180 ||
-        position.longitude > 180) {
+    final String location = await resolveSelectedCoordinate(
+      position.latitude,
+      position.longitude,
+    );
+    return ResolvedLocation(text: location, accuracyMeters: horizontalAccuracy);
+  }
+
+  Future<String> resolveSelectedCoordinate(
+    double latitude,
+    double longitude,
+  ) async {
+    if (!latitude.isFinite ||
+        !longitude.isFinite ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180) {
       throw LocationUnavailableException(
         LocationUnavailableReason.invalidCoordinates,
       );
@@ -218,10 +222,7 @@ class LocationService {
 
     final List<Placemark> placemarks =
         await _withLocationTimeout<List<Placemark>>(
-          _geocoding.placemarkFromCoordinates(
-            position.latitude,
-            position.longitude,
-          ),
+          _geocoding.placemarkFromCoordinates(latitude, longitude),
         );
     if (placemarks.isEmpty) {
       throw LocationUnavailableException(LocationUnavailableReason.noPlacemark);
@@ -237,7 +238,62 @@ class LocationService {
       );
     }
 
-    return ResolvedLocation(text: location, accuracyMeters: horizontalAccuracy);
+    return location;
+  }
+
+  Future<Position> _waitForPrecisePosition() async {
+    final StreamIterator<Position> updates = StreamIterator<Position>(
+      Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.best,
+          distanceFilter: 0,
+        ),
+      ),
+    );
+    final Stopwatch clock = Stopwatch()..start();
+    Position? bestPosition;
+    try {
+      while (clock.elapsed < _operationTimeout) {
+        final Duration remaining = _operationTimeout - clock.elapsed;
+        bool hasNext;
+        try {
+          hasNext = await updates.moveNext().timeout(remaining);
+        } on TimeoutException {
+          break;
+        }
+        if (!hasNext) {
+          throw StateError('The location update stream ended unexpectedly.');
+        }
+        final Position candidate = updates.current;
+        final Duration age = DateTime.now().difference(
+          candidate.timestamp.toLocal(),
+        );
+        if (age.isNegative || age > _maximumPositionAge) {
+          continue;
+        }
+        if (!candidate.accuracy.isFinite || candidate.accuracy < 0) {
+          throw LocationUnavailableException(
+            LocationUnavailableReason.invalidAccuracy,
+          );
+        }
+        if (bestPosition == null ||
+            candidate.accuracy < bestPosition.accuracy) {
+          bestPosition = candidate;
+        }
+        if (candidate.accuracy <= _maximumHorizontalAccuracyMeters) {
+          return candidate;
+        }
+      }
+    } finally {
+      await updates.cancel();
+    }
+    if (bestPosition case final Position position) {
+      throw LocationUnavailableException(
+        LocationUnavailableReason.inaccuratePosition,
+        accuracyMeters: position.accuracy,
+      );
+    }
+    throw LocationUnavailableException(LocationUnavailableReason.timedOut);
   }
 
   Future<T> _withLocationTimeout<T>(Future<T> operation) => operation.timeout(
