@@ -602,16 +602,13 @@ class _CameraScreenState extends State<CameraScreen> {
       (_cameraCoordinator.state == CameraSessionState.ready ||
           _cameraCoordinator.state == CameraSessionState.recording);
 
-  Future<void> _toggleFocusMode() async {
-    if (!_canFocus) {
+  Future<void> _restoreAutoFocus() async {
+    if (!_canFocus || _cameraCoordinator.focusMode == FocusMode.auto) {
       return;
     }
     setState(() => _focusBusy = true);
     try {
-      final FocusMode next = _cameraCoordinator.focusMode == FocusMode.auto
-          ? FocusMode.locked
-          : FocusMode.auto;
-      await _cameraCoordinator.setFocusMode(next);
+      await _cameraCoordinator.setFocusMode(FocusMode.auto);
       if (mounted) {
         setState(() {
           _focusIndicator = null;
@@ -1085,22 +1082,18 @@ class _CameraScreenState extends State<CameraScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     _buildFlashControl(cameraState == CameraSessionState.ready),
-                    TextButton(
-                      onPressed: _canFocus
-                          ? () => unawaited(_toggleFocusMode())
+                    _buildTopAction(
+                      tooltip: _cameraCoordinator.focusMode == FocusMode.auto
+                          ? '自动对焦'
+                          : '恢复自动对焦',
+                      icon: _cameraCoordinator.focusMode == FocusMode.auto
+                          ? Icons.center_focus_weak
+                          : Icons.center_focus_strong,
+                      onPressed:
+                          _canFocus &&
+                              _cameraCoordinator.focusMode == FocusMode.locked
+                          ? () => unawaited(_restoreAutoFocus())
                           : null,
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        disabledForegroundColor: Colors.white38,
-                        minimumSize: const Size(48, 46),
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                      ),
-                      child: Text(
-                        _cameraCoordinator.focusMode == FocusMode.auto
-                            ? '自动对焦'
-                            : '手动对焦',
-                        style: const TextStyle(fontSize: 12),
-                      ),
                     ),
                     _buildLocationControl(cameraState),
                     _buildTopAction(
