@@ -726,8 +726,8 @@ class _CameraScreenState extends State<CameraScreen> {
           )
           .toList(growable: false),
       child: Container(
-        height: 44,
-        width: 44,
+        height: 46,
+        width: 46,
         alignment: Alignment.center,
         child: Icon(
           mode == FlashMode.off
@@ -738,7 +738,7 @@ class _CameraScreenState extends State<CameraScreen> {
                     ? Colors.white
                     : _cameraYellow
               : Colors.white38,
-          size: 22,
+          size: 24,
         ),
       ),
     );
@@ -947,13 +947,13 @@ class _CameraScreenState extends State<CameraScreen> {
       tooltip: tooltip,
       onPressed: onPressed,
       style: IconButton.styleFrom(
-        fixedSize: const Size(44, 44),
+        fixedSize: const Size(46, 46),
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
         disabledForegroundColor: Colors.white38,
         shape: const CircleBorder(),
       ),
-      icon: Icon(icon, size: 24),
+      icon: Icon(icon, size: 26),
     );
   }
 
@@ -967,20 +967,20 @@ class _CameraScreenState extends State<CameraScreen> {
       tooltip: '在地图上确认地点',
       onPressed: enabled ? () => unawaited(_openLocationMap()) : null,
       style: IconButton.styleFrom(
-        fixedSize: const Size(44, 44),
+        fixedSize: const Size(46, 46),
         foregroundColor: Colors.white,
         disabledForegroundColor: Colors.white38,
         shape: const CircleBorder(),
       ),
       icon: _locationLoading
           ? const SizedBox.square(
-              dimension: 18,
+              dimension: 20,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
                 color: Colors.white,
               ),
             )
-          : const Icon(Icons.gps_fixed_rounded, size: 22),
+          : const Icon(Icons.gps_fixed_rounded, size: 24),
     );
   }
 
@@ -993,8 +993,8 @@ class _CameraScreenState extends State<CameraScreen> {
             borderRadius: BorderRadius.circular(32),
             boxShadow: const <BoxShadow>[
               BoxShadow(
-                color: Color(0x66000000),
-                blurRadius: 14,
+                color: Color(0x40000000),
+                blurRadius: 10,
                 offset: Offset(0, 3),
               ),
             ],
@@ -1002,10 +1002,10 @@ class _CameraScreenState extends State<CameraScreen> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(32),
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
               child: Container(
                 padding: const EdgeInsets.all(4),
-                color: const Color(0xE6242426),
+                color: AppPalette.translucentPill,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
