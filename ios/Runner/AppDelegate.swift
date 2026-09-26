@@ -84,8 +84,8 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
   private let confirmButton = UIButton(type: .system)
   private var hasLocatedUser = false
   private var didFinish = false
-  private var selectedFeatureRequest: MKMapItemRequest?
-  private var selectedFeature: MKMapFeatureAnnotation?
+  private var selectedFeatureRequest: AnyObject?
+  private var selectedFeature: AnyObject?
   private var selectedPlace: [String: Any]?
   private var selectedPlaceCoordinate: CLLocationCoordinate2D?
 
@@ -192,8 +192,7 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
   }
 
   @objc private func centerOnUser() {
-    selectedFeatureRequest?.cancel()
-    selectedFeatureRequest = nil
+    cancelSelectedFeatureRequest()
     selectedFeature = nil
     selectedPlace = nil
     selectedPlaceCoordinate = nil
@@ -228,7 +227,7 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
     guard #available(iOS 16.0, *),
           let feature = view.annotation as? MKMapFeatureAnnotation
     else { return }
-    selectedFeatureRequest?.cancel()
+    cancelSelectedFeatureRequest()
     selectedFeature = feature
     selectedPlace = nil
     selectedPlaceCoordinate = nil
@@ -280,8 +279,7 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
           let feature = view.annotation as? MKMapFeatureAnnotation,
           selectedFeature === feature
     else { return }
-    selectedFeatureRequest?.cancel()
-    selectedFeatureRequest = nil
+    cancelSelectedFeatureRequest()
     selectedFeature = nil
     selectedPlace = nil
     selectedPlaceCoordinate = nil
@@ -296,8 +294,7 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
     let distance = CLLocation(latitude: center.latitude, longitude: center.longitude)
       .distance(from: CLLocation(latitude: selected.latitude, longitude: selected.longitude))
     if distance > 10 {
-      selectedFeatureRequest?.cancel()
-      selectedFeatureRequest = nil
+      cancelSelectedFeatureRequest()
       selectedFeature = nil
       selectedPlace = nil
       selectedPlaceCoordinate = nil
@@ -322,12 +319,18 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
   private func finish(_ selected: [String: Any]?) {
     guard !didFinish else { return }
     didFinish = true
-    selectedFeatureRequest?.cancel()
-    selectedFeatureRequest = nil
+    cancelSelectedFeatureRequest()
     let callback = onSelection
     dismiss(animated: true) {
       callback(selected)
     }
+  }
+
+  private func cancelSelectedFeatureRequest() {
+    if #available(iOS 16.0, *) {
+      (selectedFeatureRequest as? MKMapItemRequest)?.cancel()
+    }
+    selectedFeatureRequest = nil
   }
 }
 
