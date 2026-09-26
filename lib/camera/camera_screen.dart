@@ -29,6 +29,7 @@ class CameraScreen extends StatefulWidget {
 class _CameraScreenState extends State<CameraScreen> {
   static const Color _accentColor = AppPalette.accent;
   static const Color _recordingColor = AppPalette.recording;
+  static const Color _cameraYellow = Color(0xFFFFD94D);
 
   late final CameraCoordinator _cameraCoordinator;
   late final LocationService _locationService;
@@ -646,12 +647,12 @@ class _CameraScreenState extends State<CameraScreen> {
           ? () => unawaited(_cameraCoordinator.switchCamera())
           : null,
       style: IconButton.styleFrom(
-        fixedSize: const Size(54, 54),
-        backgroundColor: AppPalette.surface,
+        fixedSize: const Size(52, 52),
+        backgroundColor: AppPalette.translucentPill,
         foregroundColor: canSwitch ? Colors.white : Colors.white38,
         shape: const CircleBorder(),
       ),
-      icon: const Icon(Icons.sync_rounded, size: 27),
+      icon: const Icon(Icons.cameraswitch_rounded, size: 27),
     );
   }
 
@@ -682,7 +683,11 @@ class _CameraScreenState extends State<CameraScreen> {
           mode == FlashMode.off
               ? Icons.flash_off_rounded
               : Icons.flash_on_rounded,
-          color: enabled ? _accentColor : Colors.white38,
+          color: enabled
+              ? mode == FlashMode.off
+                    ? Colors.white
+                    : _cameraYellow
+              : Colors.white38,
           size: 22,
         ),
       ),
@@ -693,7 +698,7 @@ class _CameraScreenState extends State<CameraScreen> {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: AppPalette.translucentPill,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(28),
       ),
       child: Row(
@@ -735,13 +740,13 @@ class _CameraScreenState extends State<CameraScreen> {
           height: 40,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: selected ? AppPalette.elevatedSurface : Colors.transparent,
+            color: selected ? AppPalette.translucentPill : Colors.transparent,
             borderRadius: BorderRadius.circular(24),
           ),
           child: Text(
             label,
             style: TextStyle(
-              color: selected ? _accentColor : Colors.white70,
+              color: selected ? _cameraYellow : Colors.white70,
               fontSize: 15,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
             ),
@@ -968,18 +973,18 @@ class _CameraScreenState extends State<CameraScreen> {
       child: Tooltip(
         message: '浏览照片与视频',
         child: SizedBox.square(
-          dimension: 82,
+          dimension: 52,
           child: Material(
             color: Colors.transparent,
             child: InkWell(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(26),
               onTap: enabled ? _openGallery : null,
               child: Stack(
                 fit: StackFit.expand,
                 children: <Widget>[
                   if (_recentThumbnailBytes case final Uint8List bytes)
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(26),
                       child: Image.memory(
                         bytes,
                         fit: BoxFit.cover,
@@ -991,7 +996,7 @@ class _CameraScreenState extends State<CameraScreen> {
                     DecoratedBox(
                       decoration: BoxDecoration(
                         color: AppPalette.surface,
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(26),
                       ),
                       child: const Icon(
                         Icons.photo_library_outlined,
@@ -999,29 +1004,6 @@ class _CameraScreenState extends State<CameraScreen> {
                         size: 28,
                       ),
                     ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      height: 22,
-                      alignment: Alignment.center,
-                      decoration: const BoxDecoration(
-                        color: Color(0xB3000000),
-                        borderRadius: BorderRadius.vertical(
-                          bottom: Radius.circular(10),
-                        ),
-                      ),
-                      child: const Text(
-                        '浏览',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ),
                   if (_recentThumbnail?.kind == 'video')
                     const Positioned(
                       top: 4,
@@ -1063,7 +1045,7 @@ class _CameraScreenState extends State<CameraScreen> {
       ? controller.value.aspectRatio
       : 1 / controller.value.aspectRatio;
 
-  Widget _buildPreviewBackdrop(CameraController controller) {
+  Widget _buildCameraPreview(CameraController controller) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final double frameAspectRatio = _frameAspectRatio(
@@ -1071,19 +1053,13 @@ class _CameraScreenState extends State<CameraScreen> {
           constraints,
         );
         return ClipRect(
-          child: Stack(
-            fit: StackFit.expand,
-            children: <Widget>[
-              FittedBox(
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  width: constraints.maxWidth,
-                  height: constraints.maxWidth / frameAspectRatio,
-                  child: CameraPreview(controller),
-                ),
-              ),
-              const ColoredBox(color: AppPalette.previewScrim),
-            ],
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: constraints.maxWidth,
+              height: constraints.maxWidth / frameAspectRatio,
+              child: CameraPreview(controller),
+            ),
           ),
         );
       },
@@ -1104,99 +1080,11 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  Widget _buildViewfinder(
-    CameraController? controller,
-    CameraSessionState cameraState,
-  ) {
-    return Stack(
-      fit: StackFit.expand,
-      children: <Widget>[
-        if (controller != null && controller.value.isInitialized)
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onScaleStart: _handleZoomGestureStart,
-            onScaleUpdate: _handleZoomGestureUpdate,
-            onScaleEnd: _handleZoomGestureEnd,
-            child: LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints constraints) {
-                final double frameAspectRatio = _frameAspectRatio(
-                  controller,
-                  constraints,
-                );
-                final double frameWidth = math.min(
-                  constraints.maxWidth,
-                  constraints.maxHeight * frameAspectRatio,
-                );
-                return Align(
-                  alignment: Alignment.bottomCenter,
-                  child: SizedBox(
-                    width: frameWidth,
-                    height: frameWidth / frameAspectRatio,
-                    child: CameraPreview(
-                      controller,
-                      child: _buildWatermarkPreview(cameraState),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-              child: _buildTopBar(cameraState),
-            ),
-          ),
-        ),
-        Positioned.fill(
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 62, 16, 0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  if (_visibleError case final String errorText)
-                    _StatusCard(
-                      message: errorText,
-                      actionLabel: cameraState == CameraSessionState.error
-                          ? '重试相机'
-                          : _locationNeedsSystemSettings
-                          ? '系统设置'
-                          : '刷新定位',
-                      onAction: cameraState == CameraSessionState.error
-                          ? _retryCamera
-                          : _locationNeedsSystemSettings
-                          ? _openSystemSettings
-                          : _refreshLocation,
-                    ),
-                  if (_mediaMessage case final String mediaMessage)
-                    _buildMediaMessage(mediaMessage),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildControlPanel(CameraSessionState cameraState) {
     final bool canChangeMode = cameraState == CameraSessionState.ready;
     final List<CameraZoomStep> steps = _visibleZoomSteps();
-    return Container(
-      color: AppPalette.controlBar,
-      padding: EdgeInsets.fromLTRB(
-        24,
-        10,
-        24,
-        12 + MediaQuery.viewPaddingOf(context).bottom,
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -1209,8 +1097,10 @@ class _CameraScreenState extends State<CameraScreen> {
               showDial: _zoomGestureActive,
               onFactorChanged: _cameraCoordinator.setZoomFactor,
               onStepSelected: _selectZoomStep,
-            ),
-          if (steps.isNotEmpty) const SizedBox(height: 10),
+            )
+          else
+            const SizedBox(height: 70),
+          const SizedBox(height: 10),
           Row(
             children: <Widget>[
               Expanded(
@@ -1228,7 +1118,7 @@ class _CameraScreenState extends State<CameraScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 36),
           _buildCaptureModeControl(canChangeMode),
         ],
       ),
@@ -1239,28 +1129,103 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget build(BuildContext context) {
     final CameraController? controller = _cameraCoordinator.controller;
     final CameraSessionState cameraState = _cameraCoordinator.state;
+    final EdgeInsets safePadding = MediaQuery.viewPaddingOf(context);
 
     return Scaffold(
       backgroundColor: AppPalette.background,
-      body: Stack(
-        fit: StackFit.expand,
-        children: <Widget>[
-          if (controller != null && controller.value.isInitialized)
-            _buildPreviewBackdrop(controller),
-          Column(
+      body: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final double panelBelowFrame = 176 + safePadding.bottom;
+          final double frameHeight = math.min(
+            constraints.maxWidth * 4 / 3,
+            constraints.maxHeight - panelBelowFrame - safePadding.top - 104,
+          );
+          final double frameTop =
+              constraints.maxHeight - panelBelowFrame - frameHeight;
+          final double frameBottom = frameTop + frameHeight;
+          final bool previewReady =
+              controller != null && controller.value.isInitialized;
+
+          return Stack(
+            fit: StackFit.expand,
             children: <Widget>[
-              SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
-                  child: _buildTopBar(cameraState),
+              if (previewReady)
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onScaleStart: _handleZoomGestureStart,
+                  onScaleUpdate: _handleZoomGestureUpdate,
+                  onScaleEnd: _handleZoomGestureEnd,
+                  child: _buildCameraPreview(controller),
+                ),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: frameTop,
+                child: const IgnorePointer(
+                  child: ColoredBox(color: AppPalette.previewScrim),
                 ),
               ),
-              Expanded(child: _buildViewfinder(controller, cameraState)),
-              _buildControlPanel(cameraState),
+              Positioned(
+                top: frameBottom,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: const IgnorePointer(
+                  child: ColoredBox(color: AppPalette.controlBar),
+                ),
+              ),
+              if (previewReady && _locationText != null)
+                Positioned(
+                  top: frameTop,
+                  left: 0,
+                  right: 0,
+                  height: frameHeight,
+                  child: IgnorePointer(
+                    child: _buildWatermarkPreview(cameraState),
+                  ),
+                ),
+              Positioned(
+                top: safePadding.top + 30,
+                left: 20,
+                right: 20,
+                child: _buildTopBar(cameraState),
+              ),
+              Positioned(
+                top: safePadding.top + 92,
+                left: 16,
+                right: 16,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    if (_visibleError case final String errorText)
+                      _StatusCard(
+                        message: errorText,
+                        actionLabel: cameraState == CameraSessionState.error
+                            ? '重试相机'
+                            : _locationNeedsSystemSettings
+                            ? '系统设置'
+                            : '刷新定位',
+                        onAction: cameraState == CameraSessionState.error
+                            ? _retryCamera
+                            : _locationNeedsSystemSettings
+                            ? _openSystemSettings
+                            : _refreshLocation,
+                      ),
+                    if (_mediaMessage case final String mediaMessage)
+                      _buildMediaMessage(mediaMessage),
+                  ],
+                ),
+              ),
+              Positioned(
+                top: frameBottom - 70,
+                left: 0,
+                right: 0,
+                child: _buildControlPanel(cameraState),
+              ),
             ],
-          ),
-        ],
+          );
+        },
       ),
     );
   }

@@ -207,17 +207,15 @@ class _ZoomChip extends StatelessWidget {
             alignment: Alignment.center,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: selected
-                  ? AppPalette.elevatedSurface
-                  : AppPalette.translucentControl,
+              color: selected ? AppPalette.translucentPill : Colors.transparent,
               borderRadius: BorderRadius.circular(18),
             ),
             child: Text(
               label,
               textScaler: TextScaler.noScaling,
               style: TextStyle(
-                color: selected ? AppPalette.accent : Colors.white70,
-                fontSize: 13,
+                color: selected ? const Color(0xFFFFD94D) : Colors.white70,
+                fontSize: 15,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
               ),
             ),
