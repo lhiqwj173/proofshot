@@ -175,27 +175,29 @@ class _CameraScreenState extends State<CameraScreen> {
       if (selected == null || !mounted || _isShuttingDown) {
         return;
       }
-      final String suggested = await _locationService.resolveSelectedCoordinate(
-        selected.latitude,
-        selected.longitude,
-      );
+      final NearbyMapPlace? selectedPlace = selected.candidates.isEmpty
+          ? null
+          : selected.candidates.single;
+      final String? coordinateAddress = selectedPlace == null
+          ? await _locationService.resolveSelectedCoordinate(
+              selected.latitude,
+              selected.longitude,
+            )
+          : null;
       if (!mounted || _isShuttingDown) {
         return;
       }
-      String preferred = suggested;
-      for (final NearbyMapPlace place in selected.candidates) {
-        if (place.distanceMeters <= 30 &&
-            place.address.isNotEmpty &&
-            place.address.characters.length <= 40) {
-          preferred = place.address;
-          break;
-        }
-      }
+      final String preferred = selectedPlace == null
+          ? coordinateAddress!
+          : selectedPlace.address.isNotEmpty &&
+                selectedPlace.address.characters.length <= 40
+          ? selectedPlace.address
+          : selectedPlace.name;
       final String? confirmed = await showDialog<String>(
         context: context,
         builder: (BuildContext dialogContext) => _LocationConfirmationDialog(
           initialAddress: preferred,
-          coordinateAddress: suggested,
+          coordinateAddress: coordinateAddress,
           nearbyPlaces: selected.candidates,
         ),
       );
@@ -1315,7 +1317,7 @@ class _LocationConfirmationDialog extends StatefulWidget {
   });
 
   final String initialAddress;
-  final String coordinateAddress;
+  final String? coordinateAddress;
   final List<NearbyMapPlace> nearbyPlaces;
 
   @override
@@ -1365,27 +1367,28 @@ class _LocationConfirmationDialogState
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const Text('请选择准确的地点，或直接修改水印文字。附近地点仅供参考。'),
+                const Text('请核对地点，也可以直接修改水印文字。'),
                 const SizedBox(height: 12),
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('坐标反查地址'),
-                  subtitle: Text(widget.coordinateAddress),
-                  onTap: () => _chooseAddress(widget.coordinateAddress),
-                ),
+                if (widget.coordinateAddress case final String address)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('坐标反查地址'),
+                    subtitle: Text(address),
+                    onTap: () => _chooseAddress(address),
+                  ),
                 for (final NearbyMapPlace place in widget.nearbyPlaces)
                   ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
                     title: Text(place.name),
-                    subtitle: Text(
-                      place.address.isEmpty
-                          ? '距选点约 ${place.distanceMeters.round()} 米'
-                          : '${place.address} · 约 ${place.distanceMeters.round()} 米',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    subtitle: place.address.isEmpty
+                        ? null
+                        : Text(
+                            place.address,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                     onTap: () => _chooseAddress(
                       place.address.isEmpty ? place.name : place.address,
                     ),

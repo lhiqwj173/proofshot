@@ -84,7 +84,10 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
   private let confirmButton = UIButton(type: .system)
   private var hasLocatedUser = false
   private var didFinish = false
-  private var nearbySearch: MKLocalSearch?
+  private var selectedFeatureRequest: MKMapItemRequest?
+  private var selectedFeature: MKMapFeatureAnnotation?
+  private var selectedPlace: [String: Any]?
+  private var selectedPlaceCoordinate: CLLocationCoordinate2D?
 
   init(onSelection: @escaping ([String: Any]?) -> Void) {
     self.onSelection = onSelection
@@ -113,6 +116,9 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
 
     mapView.delegate = self
     mapView.showsUserLocation = true
+    if #available(iOS 16.0, *) {
+      mapView.selectableMapFeatures = [.pointsOfInterest]
+    }
     mapView.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(mapView)
 
@@ -176,7 +182,9 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
       confirmButton.isEnabled = true
       confirmButton.alpha = 1
     }
-    statusLabel.text = "蓝点是当前位置；拖动地图，把红色图钉放到要写入水印的位置。"
+    if selectedPlace == nil && selectedFeatureRequest == nil {
+      statusLabel.text = "蓝点是当前位置；可拖动红色图钉选点，或点选地图上的地点名称。"
+    }
   }
 
   func mapView(_ mapView: MKMapView, didFailToLocateUserWithError error: Error) {
@@ -184,6 +192,13 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
   }
 
   @objc private func centerOnUser() {
+    selectedFeatureRequest?.cancel()
+    selectedFeatureRequest = nil
+    selectedFeature = nil
+    selectedPlace = nil
+    selectedPlaceCoordinate = nil
+    confirmButton.isEnabled = hasLocatedUser
+    confirmButton.alpha = hasLocatedUser ? 1 : 0.45
     guard let location = mapView.userLocation.location else {
       statusLabel.text = "仍在获取当前位置，请稍后重试。"
       return
@@ -201,74 +216,95 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
       statusLabel.text = "请等待当前位置出现后再选点。"
       return
     }
-    let coordinate = mapView.centerCoordinate
+    let coordinate = selectedPlaceCoordinate ?? mapView.centerCoordinate
     guard CLLocationCoordinate2DIsValid(coordinate) else {
       statusLabel.text = "选点坐标无效，请重新选择。"
       return
     }
+    finish(selectedCoordinate: coordinate, candidates: selectedPlace.map { [$0] } ?? [])
+  }
+
+  func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+    guard #available(iOS 16.0, *),
+          let feature = view.annotation as? MKMapFeatureAnnotation
+    else { return }
+    selectedFeatureRequest?.cancel()
+    selectedFeature = feature
+    selectedPlace = nil
+    selectedPlaceCoordinate = nil
     confirmButton.isEnabled = false
     confirmButton.alpha = 0.45
-    statusLabel.text = "正在查找附近的地图地点…"
-    let request = MKLocalPointsOfInterestRequest(center: coordinate, radius: 100)
-    let search = MKLocalSearch(request: request)
-    nearbySearch = search
-    search.start { [weak self] response, error in
+    statusLabel.text = "正在读取所选地点…"
+    let request = MKMapItemRequest(mapFeatureAnnotation: feature)
+    selectedFeatureRequest = request
+    request.getMapItem { [weak self] item, error in
       DispatchQueue.main.async {
-        guard let self, !self.didFinish else { return }
-        self.nearbySearch = nil
+        guard let self, !self.didFinish,
+              self.selectedFeatureRequest === request
+        else { return }
+        self.selectedFeatureRequest = nil
+        self.confirmButton.isEnabled = true
+        self.confirmButton.alpha = 1
         if let error {
-          self.offerSearchFailure(error.localizedDescription, coordinate: coordinate)
+          self.statusLabel.text = "地点详情读取失败：\(error.localizedDescription)。仍可用红色图钉选点。"
           return
         }
-        guard let response else {
-          self.offerSearchFailure("地图服务没有返回查询结果。", coordinate: coordinate)
+        guard let item,
+              let name = item.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty,
+              CLLocationCoordinate2DIsValid(item.placemark.coordinate)
+        else {
+          self.statusLabel.text = "该地图地点没有可用的名称或坐标。仍可用红色图钉选点。"
           return
         }
-        let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        let candidates: [(distance: Double, value: [String: Any])] = response.mapItems.compactMap { item in
-          guard let name = item.name?.trimmingCharacters(in: .whitespacesAndNewlines),
-                !name.isEmpty,
-                let location = item.placemark.location
-          else { return nil }
-          let distance = origin.distance(from: location)
-          guard distance <= 100 else { return nil }
-          let street = item.placemark.postalAddress?.street
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-          let fallbackAddress = item.placemark.title?
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-          let address = street.isEmpty ? fallbackAddress : street
-          return (distance, [
-            "name": name,
-            "address": address,
-            "distanceMeters": distance,
-          ])
-        }
-        let sorted = candidates.sorted { $0.distance < $1.distance }
-        self.finish(
-          selectedCoordinate: coordinate,
-          candidates: Array(sorted.prefix(6).map { $0.value })
-        )
+        let street = item.placemark.postalAddress?.street
+          .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let fallbackAddress = item.placemark.title?
+          .replacingOccurrences(of: "\n", with: " ")
+          .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let address = street.isEmpty ? fallbackAddress : street
+        self.selectedPlace = [
+          "name": name,
+          "address": address,
+          "distanceMeters": 0.0,
+        ]
+        self.selectedPlaceCoordinate = item.placemark.coordinate
+        self.mapView.setCenter(item.placemark.coordinate, animated: true)
+        self.statusLabel.text = "已选地点：\(name)。点击下一步核对地址。"
       }
     }
   }
 
-  private func offerSearchFailure(_ message: String, coordinate: CLLocationCoordinate2D) {
-    statusLabel.text = "附近地点查询失败：\(message)"
-    confirmButton.isEnabled = true
-    confirmButton.alpha = 1
-    let alert = UIAlertController(
-      title: "附近地点查询失败",
-      message: message,
-      preferredStyle: .alert
-    )
-    alert.addAction(UIAlertAction(title: "重试查询", style: .default) { [weak self] _ in
-      self?.confirm()
-    })
-    alert.addAction(UIAlertAction(title: "仅用坐标地址", style: .default) { [weak self] _ in
-      self?.finish(selectedCoordinate: coordinate, candidates: [])
-    })
-    present(alert, animated: true)
+  func mapView(_ mapView: MKMapView, didDeselect view: MKAnnotationView) {
+    guard #available(iOS 16.0, *),
+          let feature = view.annotation as? MKMapFeatureAnnotation,
+          selectedFeature === feature
+    else { return }
+    selectedFeatureRequest?.cancel()
+    selectedFeatureRequest = nil
+    selectedFeature = nil
+    selectedPlace = nil
+    selectedPlaceCoordinate = nil
+    confirmButton.isEnabled = hasLocatedUser
+    confirmButton.alpha = hasLocatedUser ? 1 : 0.45
+    statusLabel.text = "蓝点是当前位置；可拖动红色图钉选点，或点选地图上的地点名称。"
+  }
+
+  func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+    guard let selected = selectedPlaceCoordinate else { return }
+    let center = mapView.centerCoordinate
+    let distance = CLLocation(latitude: center.latitude, longitude: center.longitude)
+      .distance(from: CLLocation(latitude: selected.latitude, longitude: selected.longitude))
+    if distance > 10 {
+      selectedFeatureRequest?.cancel()
+      selectedFeatureRequest = nil
+      selectedFeature = nil
+      selectedPlace = nil
+      selectedPlaceCoordinate = nil
+      confirmButton.isEnabled = hasLocatedUser
+      confirmButton.alpha = hasLocatedUser ? 1 : 0.45
+      statusLabel.text = "地图已移动；将使用红色图钉所指的位置。"
+    }
   }
 
   @objc private func cancel() {
@@ -286,8 +322,8 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
   private func finish(_ selected: [String: Any]?) {
     guard !didFinish else { return }
     didFinish = true
-    nearbySearch?.cancel()
-    nearbySearch = nil
+    selectedFeatureRequest?.cancel()
+    selectedFeatureRequest = nil
     let callback = onSelection
     dismiss(animated: true) {
       callback(selected)
