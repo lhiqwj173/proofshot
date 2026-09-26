@@ -182,41 +182,21 @@ class _CameraScreenState extends State<CameraScreen> {
       if (!mounted || _isShuttingDown) {
         return;
       }
-      String edited = suggested;
+      String preferred = suggested;
+      for (final NearbyMapPlace place in selected.candidates) {
+        if (place.distanceMeters <= 30 &&
+            place.address.isNotEmpty &&
+            place.address.characters.length <= 40) {
+          preferred = place.address;
+          break;
+        }
+      }
       final String? confirmed = await showDialog<String>(
         context: context,
-        builder: (BuildContext dialogContext) => AlertDialog(
-          title: const Text('确认水印地点'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              const Text('请核对地图选点对应的地址。门牌不准确时可直接修改。'),
-              const SizedBox(height: 16),
-              TextFormField(
-                initialValue: suggested,
-                onChanged: (String value) => edited = value,
-                maxLength: 40,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: '水印地点'),
-              ),
-            ],
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () {
-                final String value = edited.trim();
-                if (value.isEmpty) {
-                  return;
-                }
-                Navigator.of(dialogContext).pop(value);
-              },
-              child: const Text('使用此地点'),
-            ),
-          ],
+        builder: (BuildContext dialogContext) => _LocationConfirmationDialog(
+          initialAddress: preferred,
+          coordinateAddress: suggested,
+          nearbyPlaces: selected.candidates,
         ),
       );
       if (confirmed != null && mounted && !_isShuttingDown) {
@@ -1323,6 +1303,114 @@ class _CameraScreenState extends State<CameraScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+class _LocationConfirmationDialog extends StatefulWidget {
+  const _LocationConfirmationDialog({
+    required this.initialAddress,
+    required this.coordinateAddress,
+    required this.nearbyPlaces,
+  });
+
+  final String initialAddress;
+  final String coordinateAddress;
+  final List<NearbyMapPlace> nearbyPlaces;
+
+  @override
+  State<_LocationConfirmationDialog> createState() =>
+      _LocationConfirmationDialogState();
+}
+
+class _LocationConfirmationDialogState
+    extends State<_LocationConfirmationDialog> {
+  late final TextEditingController _addressController;
+
+  @override
+  void initState() {
+    super.initState();
+    _addressController = TextEditingController(text: widget.initialAddress)
+      ..addListener(_handleAddressChanged);
+  }
+
+  @override
+  void dispose() {
+    _addressController.removeListener(_handleAddressChanged);
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  void _handleAddressChanged() => setState(() {});
+
+  void _chooseAddress(String address) {
+    _addressController.value = TextEditingValue(
+      text: address,
+      selection: TextSelection.collapsed(offset: address.length),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final String value = _addressController.text.trim();
+    final bool canConfirm = value.isNotEmpty && value.characters.length <= 40;
+    return AlertDialog(
+      title: const Text('确认水印地点'),
+      content: SizedBox(
+        width: MediaQuery.sizeOf(context).width - 96,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 420),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Text('请选择准确的地点，或直接修改水印文字。附近地点仅供参考。'),
+                const SizedBox(height: 12),
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('坐标反查地址'),
+                  subtitle: Text(widget.coordinateAddress),
+                  onTap: () => _chooseAddress(widget.coordinateAddress),
+                ),
+                for (final NearbyMapPlace place in widget.nearbyPlaces)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(place.name),
+                    subtitle: Text(
+                      place.address.isEmpty
+                          ? '距选点约 ${place.distanceMeters.round()} 米'
+                          : '${place.address} · 约 ${place.distanceMeters.round()} 米',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onTap: () => _chooseAddress(
+                      place.address.isEmpty ? place.name : place.address,
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _addressController,
+                  maxLength: 40,
+                  decoration: const InputDecoration(labelText: '最终水印文字'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          onPressed: canConfirm ? () => Navigator.of(context).pop(value) : null,
+          child: const Text('使用此地点'),
+        ),
+      ],
     );
   }
 }

@@ -1,4 +1,5 @@
 import AVKit
+import Contacts
 import Flutter
 import MapKit
 import UIKit
@@ -77,14 +78,15 @@ private final class WatermarkLocationPickerBridge {
 }
 
 private final class WatermarkLocationPickerViewController: UIViewController, MKMapViewDelegate {
-  private let onSelection: ([String: Double]?) -> Void
+  private let onSelection: ([String: Any]?) -> Void
   private let mapView = MKMapView()
   private let statusLabel = UILabel()
   private let confirmButton = UIButton(type: .system)
   private var hasLocatedUser = false
   private var didFinish = false
+  private var nearbySearch: MKLocalSearch?
 
-  init(onSelection: @escaping ([String: Double]?) -> Void) {
+  init(onSelection: @escaping ([String: Any]?) -> Void) {
     self.onSelection = onSelection
     super.init(nibName: nil, bundle: nil)
   }
@@ -204,16 +206,88 @@ private final class WatermarkLocationPickerViewController: UIViewController, MKM
       statusLabel.text = "选点坐标无效，请重新选择。"
       return
     }
-    finish(["latitude": coordinate.latitude, "longitude": coordinate.longitude])
+    confirmButton.isEnabled = false
+    confirmButton.alpha = 0.45
+    statusLabel.text = "正在查找附近的地图地点…"
+    let request = MKLocalPointsOfInterestRequest(center: coordinate, radius: 100)
+    let search = MKLocalSearch(request: request)
+    nearbySearch = search
+    search.start { [weak self] response, error in
+      DispatchQueue.main.async {
+        guard let self, !self.didFinish else { return }
+        self.nearbySearch = nil
+        if let error {
+          self.offerSearchFailure(error.localizedDescription, coordinate: coordinate)
+          return
+        }
+        guard let response else {
+          self.offerSearchFailure("地图服务没有返回查询结果。", coordinate: coordinate)
+          return
+        }
+        let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let candidates: [(distance: Double, value: [String: Any])] = response.mapItems.compactMap { item in
+          guard let name = item.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !name.isEmpty,
+                let location = item.placemark.location
+          else { return nil }
+          let distance = origin.distance(from: location)
+          guard distance <= 100 else { return nil }
+          let street = item.placemark.postalAddress?.street
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+          let fallbackAddress = item.placemark.title?
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+          let address = street.isEmpty ? fallbackAddress : street
+          return (distance, [
+            "name": name,
+            "address": address,
+            "distanceMeters": distance,
+          ])
+        }
+        let sorted = candidates.sorted { $0.distance < $1.distance }
+        self.finish(
+          selectedCoordinate: coordinate,
+          candidates: Array(sorted.prefix(6).map { $0.value })
+        )
+      }
+    }
+  }
+
+  private func offerSearchFailure(_ message: String, coordinate: CLLocationCoordinate2D) {
+    statusLabel.text = "附近地点查询失败：\(message)"
+    confirmButton.isEnabled = true
+    confirmButton.alpha = 1
+    let alert = UIAlertController(
+      title: "附近地点查询失败",
+      message: message,
+      preferredStyle: .alert
+    )
+    alert.addAction(UIAlertAction(title: "重试查询", style: .default) { [weak self] _ in
+      self?.confirm()
+    })
+    alert.addAction(UIAlertAction(title: "仅用坐标地址", style: .default) { [weak self] _ in
+      self?.finish(selectedCoordinate: coordinate, candidates: [])
+    })
+    present(alert, animated: true)
   }
 
   @objc private func cancel() {
     finish(nil)
   }
 
-  private func finish(_ selected: [String: Double]?) {
+  private func finish(selectedCoordinate: CLLocationCoordinate2D, candidates: [[String: Any]]) {
+    finish([
+      "latitude": selectedCoordinate.latitude,
+      "longitude": selectedCoordinate.longitude,
+      "candidates": candidates,
+    ])
+  }
+
+  private func finish(_ selected: [String: Any]?) {
     guard !didFinish else { return }
     didFinish = true
+    nearbySearch?.cancel()
+    nearbySearch = nil
     let callback = onSelection
     dismiss(animated: true) {
       callback(selected)
