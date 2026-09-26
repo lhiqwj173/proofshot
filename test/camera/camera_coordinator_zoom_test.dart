@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show Point;
 
 import 'package:camera_platform_interface/camera_platform_interface.dart';
 import 'package:flutter/services.dart';
@@ -152,6 +153,55 @@ void main() {
       CameraPlatform.instance = original;
     }
   });
+
+  test('点按取景区自动切换手动对焦，并可切回持续自动对焦', () async {
+    final CameraPlatform original = CameraPlatform.instance;
+    final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
+    CameraPlatform.instance = platform;
+    final CameraCoordinator coordinator = CameraCoordinator();
+    try {
+      await coordinator.initialize();
+      expect(coordinator.focusMode, FocusMode.auto);
+      await coordinator.setFocusPoint(const Offset(0.25, 0.7));
+      expect(coordinator.focusMode, FocusMode.locked);
+      expect(platform.lastFocusMode, FocusMode.locked);
+      expect(platform.lastFocusPoint, const Point<double>(0.25, 0.7));
+      expect(coordinator.focusPoint, const Offset(0.25, 0.7));
+
+      await coordinator.setFocusPoint(const Offset(0.6, 0.4));
+      expect(platform.lastFocusPoint, const Point<double>(0.6, 0.4));
+      expect(coordinator.focusPoint, const Offset(0.6, 0.4));
+
+      await coordinator.setFocusMode(FocusMode.auto);
+      expect(platform.lastFocusMode, FocusMode.auto);
+      expect(platform.lastFocusPoint, isNull);
+      expect(coordinator.focusPoint, isNull);
+    } finally {
+      await coordinator.shutdown();
+      CameraPlatform.instance = original;
+    }
+  });
+
+  test('录像重建控制器后恢复手动对焦点', () async {
+    final CameraPlatform original = CameraPlatform.instance;
+    final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
+    CameraPlatform.instance = platform;
+    final CameraCoordinator coordinator = CameraCoordinator();
+    try {
+      await coordinator.initialize();
+      await coordinator.setFocusMode(FocusMode.locked);
+      await coordinator.setFocusPoint(const Offset(0.3, 0.6));
+      await coordinator.setCaptureMode(CameraCaptureMode.video);
+      expect(await coordinator.startVideoRecording(), isTrue);
+      expect(platform.createdCameras, hasLength(2));
+      expect(platform.lastFocusMode, FocusMode.locked);
+      expect(platform.lastFocusPoint, const Point<double>(0.3, 0.6));
+      expect(coordinator.focusPoint, const Offset(0.3, 0.6));
+    } finally {
+      await coordinator.shutdown();
+      CameraPlatform.instance = original;
+    }
+  });
 }
 
 Future<void> _waitForZoom(
@@ -196,6 +246,8 @@ class _ZoomCameraPlatform extends CameraPlatform {
   final StreamController<CameraErrorEvent> _errors =
       StreamController<CameraErrorEvent>.broadcast();
   double? lastZoomLevel;
+  FocusMode? lastFocusMode;
+  Point<double>? lastFocusPoint;
 
   @override
   Future<List<CameraDescription>> availableCameras() async =>
@@ -247,6 +299,16 @@ class _ZoomCameraPlatform extends CameraPlatform {
 
   @override
   Future<void> setFlashMode(int cameraId, FlashMode mode) async {}
+
+  @override
+  Future<void> setFocusMode(int cameraId, FocusMode mode) async {
+    lastFocusMode = mode;
+  }
+
+  @override
+  Future<void> setFocusPoint(int cameraId, Point<double>? point) async {
+    lastFocusPoint = point;
+  }
 
   @override
   Future<double> getMinZoomLevel(int cameraId) async => minimumZoomLevel;

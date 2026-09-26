@@ -49,6 +49,8 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   CameraException? _lastCameraException;
   XFile? _pendingInterruptedRecording;
   FlashMode _flashMode = FlashMode.off;
+  FocusMode _focusMode = FocusMode.auto;
+  Offset? _focusPoint;
   double _minZoomLevel = 1;
   double _maxZoomLevel = 1;
   double _zoomLevel = 1;
@@ -66,6 +68,10 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   int get generation => _generation;
   CameraCaptureMode get captureMode => _captureMode;
   FlashMode get flashMode => _flashMode;
+  FocusMode get focusMode => _focusMode;
+  Offset? get focusPoint => _focusPoint;
+  bool get focusPointSupported =>
+      _controller?.value.focusPointSupported == true;
   CameraController? get controller => _controller;
   CameraDescription? get selectedCamera => _selectedCamera;
   bool get canSwitchCamera => _hasCameraDirection(
@@ -195,6 +201,77 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       _flashMode = mode;
+      notifyListeners();
+    });
+  }
+
+  Future<void> setFocusMode(FocusMode mode) {
+    _ensureOpen();
+    return _run<void>(() async {
+      if (_state != CameraSessionState.ready &&
+          _state != CameraSessionState.recording) {
+        throw StateError(
+          'Focus mode can only change while the camera is active.',
+        );
+      }
+      if (mode == FocusMode.locked && !focusPointSupported) {
+        throw StateError('The selected camera does not support focus points.');
+      }
+      if (_focusMode == mode) {
+        return;
+      }
+      final CameraController controller = _requireController();
+      try {
+        await controller.setFocusMode(mode);
+        if (mode == FocusMode.auto) {
+          await controller.setFocusPoint(null);
+        }
+      } on CameraException catch (error) {
+        _recordCameraException(error);
+        rethrow;
+      }
+      _focusMode = mode;
+      _focusPoint = null;
+      notifyListeners();
+    });
+  }
+
+  Future<void> setFocusPoint(Offset point) {
+    _ensureOpen();
+    if (!point.dx.isFinite ||
+        !point.dy.isFinite ||
+        point.dx < 0 ||
+        point.dx > 1 ||
+        point.dy < 0 ||
+        point.dy > 1) {
+      throw ArgumentError.value(
+        point,
+        'point',
+        'Focus point must be within the unit square.',
+      );
+    }
+    return _run<void>(() async {
+      if (_state != CameraSessionState.ready &&
+          _state != CameraSessionState.recording) {
+        throw StateError(
+          'Focus point can only change while the camera is active.',
+        );
+      }
+      if (!focusPointSupported) {
+        throw StateError('The selected camera does not support focus points.');
+      }
+      try {
+        final CameraController controller = _requireController();
+        if (_focusMode != FocusMode.locked) {
+          await controller.setFocusMode(FocusMode.locked);
+        }
+        await controller.setFocusPoint(point);
+      } on CameraException catch (error) {
+        _recordCameraException(error);
+        rethrow;
+      }
+      _focusMode = FocusMode.locked;
+      _focusPoint = point;
       notifyListeners();
     });
   }
@@ -484,6 +561,16 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
       if (_supportsFlash(camera)) {
         await candidate.setFlashMode(modeToApply);
       }
+      final bool supportsFocusPoint = candidate.value.focusPointSupported;
+      final FocusMode modeToRestore = supportsFocusPoint
+          ? _focusMode
+          : FocusMode.auto;
+      await candidate.setFocusMode(modeToRestore);
+      if (supportsFocusPoint &&
+          _focusPoint != null &&
+          modeToRestore == FocusMode.locked) {
+        await candidate.setFocusPoint(_focusPoint);
+      }
       if (!_isCurrentGeneration(operationGeneration)) {
         await candidate.dispose();
         return false;
@@ -498,6 +585,10 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
       _controller = candidate;
       _controllerHasAudio = enableAudio;
       _flashMode = modeToApply;
+      _focusMode = modeToRestore;
+      if (!supportsFocusPoint) {
+        _focusPoint = null;
+      }
       _minZoomLevel = minZoomLevel;
       _maxZoomLevel = maxZoomLevel;
       _zoomLevel = 1;

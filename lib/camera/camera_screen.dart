@@ -51,6 +51,9 @@ class _CameraScreenState extends State<CameraScreen> {
   bool? _hardwareCaptureEnabled;
   bool _zoomGestureActive = false;
   double _zoomStartFactor = 1;
+  bool _focusBusy = false;
+  Offset? _focusIndicator;
+  int? _focusIndicatorGeneration;
   WatermarkSnapshot? _recordingSnapshot;
   List<PendingWatermarkMedia> _pendingMedia = <PendingWatermarkMedia>[];
   RecentCaptureThumbnail? _recentThumbnail;
@@ -592,6 +595,78 @@ class _CameraScreenState extends State<CameraScreen> {
     _cameraCoordinator.setZoomFactor(step.factor);
   }
 
+  bool get _canFocus =>
+      !_isShuttingDown &&
+      !_focusBusy &&
+      _cameraCoordinator.focusPointSupported &&
+      (_cameraCoordinator.state == CameraSessionState.ready ||
+          _cameraCoordinator.state == CameraSessionState.recording);
+
+  Future<void> _toggleFocusMode() async {
+    if (!_canFocus) {
+      return;
+    }
+    setState(() => _focusBusy = true);
+    try {
+      final FocusMode next = _cameraCoordinator.focusMode == FocusMode.auto
+          ? FocusMode.locked
+          : FocusMode.auto;
+      await _cameraCoordinator.setFocusMode(next);
+      if (mounted) {
+        setState(() {
+          _focusIndicator = null;
+          _focusIndicatorGeneration = null;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _focusBusy = false);
+      }
+    }
+  }
+
+  Future<void> _focusAt(
+    TapUpDetails details,
+    Size previewSize,
+    double frameTop,
+    double frameBottom,
+    CameraController controller,
+  ) async {
+    if (!_canFocus) {
+      return;
+    }
+    final Offset tap = details.localPosition;
+    if (tap.dy < frameTop || tap.dy > frameBottom) {
+      return;
+    }
+    final double aspectRatio = previewSize.width > previewSize.height
+        ? controller.value.aspectRatio
+        : 1 / controller.value.aspectRatio;
+    final double imageWidth = math.max(
+      previewSize.width,
+      previewSize.height * aspectRatio,
+    );
+    final double imageHeight = imageWidth / aspectRatio;
+    final Offset point = Offset(
+      (tap.dx + (imageWidth - previewSize.width) / 2) / imageWidth,
+      (tap.dy + (imageHeight - previewSize.height) / 2) / imageHeight,
+    );
+    setState(() => _focusBusy = true);
+    try {
+      await _cameraCoordinator.setFocusPoint(point);
+      if (mounted) {
+        setState(() {
+          _focusIndicator = tap;
+          _focusIndicatorGeneration = _cameraCoordinator.generation;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _focusBusy = false);
+      }
+    }
+  }
+
   Future<void> _openGallery() async {
     _galleryOpen = true;
     _syncHardwareCapture();
@@ -1010,6 +1085,23 @@ class _CameraScreenState extends State<CameraScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     _buildFlashControl(cameraState == CameraSessionState.ready),
+                    TextButton(
+                      onPressed: _canFocus
+                          ? () => unawaited(_toggleFocusMode())
+                          : null,
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        disabledForegroundColor: Colors.white38,
+                        minimumSize: const Size(48, 46),
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                      ),
+                      child: Text(
+                        _cameraCoordinator.focusMode == FocusMode.auto
+                            ? '自动对焦'
+                            : '手动对焦',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
                     _buildLocationControl(cameraState),
                     _buildTopAction(
                       tooltip: '设置',
@@ -1223,8 +1315,34 @@ class _CameraScreenState extends State<CameraScreen> {
                   onScaleStart: _handleZoomGestureStart,
                   onScaleUpdate: _handleZoomGestureUpdate,
                   onScaleEnd: _handleZoomGestureEnd,
+                  onTapUp: (TapUpDetails details) => unawaited(
+                    _focusAt(
+                      details,
+                      constraints.biggest,
+                      frameTop,
+                      frameBottom,
+                      controller,
+                    ),
+                  ),
                   child: _buildCameraPreview(controller),
                 ),
+              if (_focusIndicator case final Offset point)
+                if (_cameraCoordinator.focusMode == FocusMode.locked &&
+                    _focusIndicatorGeneration == _cameraCoordinator.generation)
+                  Positioned(
+                    left: point.dx - 22,
+                    top: point.dy - 22,
+                    child: const IgnorePointer(
+                      child: Icon(
+                        Icons.filter_center_focus,
+                        color: _cameraYellow,
+                        size: 44,
+                        shadows: <Shadow>[
+                          Shadow(color: Colors.black87, blurRadius: 6),
+                        ],
+                      ),
+                    ),
+                  ),
               Positioned(
                 top: 0,
                 left: 0,
