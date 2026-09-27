@@ -162,6 +162,25 @@ private struct WatermarkSnapshotData {
   }
 }
 
+private enum WatermarkLayout {
+  static let safeMarginOfShortSide: CGFloat = 0.06
+  static let topInsetOfShortSide: CGFloat = 0.06
+  static let dateFontSizeOfShortSide: CGFloat = 0.027
+  static let timeFontSizeOfShortSide: CGFloat = 0.09
+  static let locationFontSizeOfShortSide: CGFloat = 0.027
+  static let customFontSizeOfShortSide: CGFloat = 0.032
+  static let brandFontSizeOfShortSide: CGFloat = 0.019
+  static let customBottomSpacingOfShortSide: CGFloat = 0.012
+  static let dateBottomSpacingOfShortSide: CGFloat = 0.0075
+  static let timeBottomSpacingOfShortSide: CGFloat = 0.036
+  static let locationBottomSpacingOfShortSide: CGFloat = 0.025
+  static let locationPinWidthOfFontSize: CGFloat = 0.58
+  static let locationPinHeightOfFontSize: CGFloat = 0.86
+  static let locationPinGapOfFontSize: CGFloat = 0.55
+  static let brandLetterSpacing: CGFloat = 0.4
+  static let minimumTextScale: CGFloat = 0.70
+}
+
 private struct PhotoRenderRequest {
   let sourceURL: URL
   let snapshot: WatermarkSnapshotData
@@ -784,63 +803,89 @@ final class WatermarkBridge {
     size: CGSize
   ) throws {
     let shortSide = min(size.width, size.height)
-    let horizontalInset = size.width * 0.03
-    let maximumWidth = size.width - (horizontalInset * 2)
+    let inset = shortSide * WatermarkLayout.safeMarginOfShortSide
+    let maximumWidth = size.width - (inset * 2)
+    var topY = shortSide * WatermarkLayout.topInsetOfShortSide
 
     if !snapshot.customText.isEmpty {
-      try drawCenteredText(
+      topY += try drawTopLeftText(
         snapshot.customText,
         in: context,
-        canvasSize: size,
-        centerY: 0.055,
-        baseFontSize: shortSide * 0.032,
+        topY: topY,
+        leftInset: inset,
+        baseFontSize: shortSide * WatermarkLayout.customFontSizeOfShortSide,
         maximumWidth: maximumWidth,
         weight: .medium,
         maximumLines: 2,
         alignment: .left
       )
+      topY += shortSide * WatermarkLayout.customBottomSpacingOfShortSide
     }
-    try drawCenteredText(
+    topY += try drawTopLeftText(
+      "\(snapshot.dateText)  ·  \(snapshot.weekdayText)",
+      in: context,
+      topY: topY,
+      leftInset: inset,
+      baseFontSize: shortSide * WatermarkLayout.dateFontSizeOfShortSide,
+      maximumWidth: maximumWidth,
+      weight: .medium,
+      maximumLines: 1,
+      alignment: .left
+    )
+    topY += shortSide * WatermarkLayout.dateBottomSpacingOfShortSide
+    topY += try drawTopLeftText(
       snapshot.timeText,
       in: context,
-      canvasSize: size,
-      centerY: 0.14,
-      baseFontSize: shortSide * 0.09,
+      topY: topY,
+      leftInset: inset,
+      baseFontSize: shortSide * WatermarkLayout.timeFontSizeOfShortSide,
       maximumWidth: maximumWidth,
       weight: .semibold,
       maximumLines: 1,
       alignment: .left
     )
-    try drawMetadata(
+    topY += shortSide * WatermarkLayout.timeBottomSpacingOfShortSide
+    topY += try drawLocation(
       snapshot,
       in: context,
-      canvasSize: size,
-      centerY: 0.22,
-      baseFontSize: shortSide * 0.035,
+      topY: topY,
+      leftInset: inset,
+      shortSide: shortSide,
       maximumWidth: maximumWidth
     )
-    drawBrand(
+    topY += shortSide * WatermarkLayout.locationBottomSpacingOfShortSide
+    _ = try drawTopLeftText(
       snapshot.brandText,
       in: context,
-      canvasSize: size,
-      shortSide: shortSide,
-      topY: 0.275
+      topY: topY,
+      leftInset: inset,
+      baseFontSize: shortSide * WatermarkLayout.brandFontSizeOfShortSide,
+      maximumWidth: maximumWidth,
+      weight: .medium,
+      maximumLines: 1,
+      alignment: .left,
+      foregroundColor: UIColor.white.withAlphaComponent(0.8),
+      letterSpacing: WatermarkLayout.brandLetterSpacing
     )
   }
 
-  private static func drawCenteredText(
+  private static func drawTopLeftText(
     _ value: String,
     in context: CGContext,
-    canvasSize: CGSize,
-    centerY: CGFloat,
+    topY: CGFloat,
+    leftInset: CGFloat,
     baseFontSize: CGFloat,
     maximumWidth: CGFloat,
     weight: UIFont.Weight,
     maximumLines: Int,
-    alignment: NSTextAlignment = .center
-  ) throws {
+    alignment: NSTextAlignment = .left,
+    foregroundColor: UIColor = .white,
+    letterSpacing: CGFloat = 0
+  ) throws -> CGFloat {
     let baseFont = UIFont.systemFont(ofSize: baseFontSize, weight: weight)
-    let measuredWidth = (value as NSString).size(withAttributes: [.font: baseFont]).width
+    let measuredWidth = (value as NSString).size(
+      withAttributes: [.font: baseFont, .kern: letterSpacing]
+    ).width
     let fontSize = fittedFontSize(
       baseFontSize: baseFontSize,
       measuredWidth: measuredWidth,
@@ -851,6 +896,18 @@ final class WatermarkBridge {
       string: value,
       attributes: textAttributes(font: font, alignment: alignment)
     )
+    attributedText.addAttribute(
+      .foregroundColor,
+      value: foregroundColor,
+      range: NSRange(location: 0, length: attributedText.length)
+    )
+    if letterSpacing != 0 {
+      attributedText.addAttribute(
+        .kern,
+        value: letterSpacing,
+        range: NSRange(location: 0, length: attributedText.length)
+      )
+    }
     let bounds = attributedText.boundingRect(
       with: CGSize(width: maximumWidth, height: CGFloat.greatestFiniteMagnitude),
       options: [.usesLineFragmentOrigin, .usesFontLeading],
@@ -859,96 +916,70 @@ final class WatermarkBridge {
     let lineCount = Int(ceil(bounds.height / font.lineHeight))
     guard lineCount <= maximumLines else {
       throw WatermarkBridgeError.watermarkLayoutDoesNotFit(
-        "Watermark text exceeds its two-line layout limit."
-      )
-    }
-    let drawingRect = CGRect(
-      x: (canvasSize.width - maximumWidth) / 2,
-      y: canvasSize.height * centerY - bounds.height / 2,
-      width: maximumWidth,
-      height: bounds.height
-    )
-    attributedText.draw(in: drawingRect)
-  }
-
-  private static func drawMetadata(
-    _ snapshot: WatermarkSnapshotData,
-    in context: CGContext,
-    canvasSize: CGSize,
-    centerY: CGFloat,
-    baseFontSize: CGFloat,
-    maximumWidth: CGFloat
-  ) throws {
-    let baseFont = UIFont.systemFont(ofSize: baseFontSize, weight: .medium)
-    let measurementText = "\(snapshot.dateText)  \(snapshot.weekdayText)  \(snapshot.locationText)"
-    let measuredWidth = (measurementText as NSString)
-      .size(withAttributes: [.font: baseFont]).width
-    let fontSize = fittedFontSize(
-      baseFontSize: baseFontSize,
-      measuredWidth: measuredWidth,
-      maximumWidth: maximumWidth
-    )
-    let font = UIFont.systemFont(ofSize: fontSize, weight: .medium)
-    let attributedText = NSMutableAttributedString(
-      string: "\(snapshot.dateText)  \(snapshot.weekdayText)  ",
-      attributes: textAttributes(font: font, alignment: .left)
-    )
-    let marker = NSTextAttachment()
-    marker.image = locationPinImage(fontSize: fontSize)
-    marker.bounds = CGRect(
-      x: 0,
-      y: -fontSize * 0.08,
-      width: fontSize * 0.58,
-      height: fontSize * 0.86
-    )
-    attributedText.append(NSAttributedString(attachment: marker))
-    attributedText.append(
-      NSAttributedString(
-        string: snapshot.locationText,
-        attributes: textAttributes(font: font, alignment: .left)
-      )
-    )
-
-    let bounds = attributedText.boundingRect(
-      with: CGSize(width: maximumWidth, height: CGFloat.greatestFiniteMagnitude),
-      options: [.usesLineFragmentOrigin, .usesFontLeading],
-      context: nil
-    )
-    let lineCount = Int(ceil(bounds.height / font.lineHeight))
-    guard lineCount <= 2 else {
-      throw WatermarkBridgeError.watermarkLayoutDoesNotFit(
-        "Watermark metadata exceeds its two-line layout limit."
+        "Watermark text exceeds its \(maximumLines)-line layout limit."
       )
     }
     attributedText.draw(
       in: CGRect(
-        x: (canvasSize.width - maximumWidth) / 2,
-        y: canvasSize.height * centerY - bounds.height / 2,
+        x: leftInset,
+        y: topY,
         width: maximumWidth,
         height: bounds.height
       )
     )
+    return bounds.height
   }
 
-  private static func drawBrand(
-    _ value: String,
+  private static func drawLocation(
+    _ snapshot: WatermarkSnapshotData,
     in context: CGContext,
-    canvasSize: CGSize,
+    topY: CGFloat,
+    leftInset: CGFloat,
     shortSide: CGFloat,
-    topY: CGFloat
-  ) {
-    let font = UIFont.systemFont(ofSize: shortSide * 0.019, weight: .medium)
-    var attributes = textAttributes(font: font, alignment: .left)
-    attributes[.kern] = 0.4
-    let measuredSize = (value as NSString).size(withAttributes: attributes)
-    let leftInset = canvasSize.width * 0.03
-    let drawingRect = CGRect(
-      x: leftInset,
-      y: canvasSize.height * topY,
-      width: measuredSize.width,
-      height: measuredSize.height
+    maximumWidth: CGFloat
+  ) throws -> CGFloat {
+    let baseFontSize = shortSide * WatermarkLayout.locationFontSizeOfShortSide
+    let baseFont = UIFont.systemFont(ofSize: baseFontSize, weight: .medium)
+    let measuredWidth = (snapshot.locationText as NSString)
+      .size(withAttributes: [.font: baseFont]).width
+    let rowDecorationWidth = baseFontSize * (
+      WatermarkLayout.locationPinWidthOfFontSize +
+        WatermarkLayout.locationPinGapOfFontSize
     )
-    (value as NSString).draw(in: drawingRect, withAttributes: attributes)
+    let fontSize = fittedFontSize(
+      baseFontSize: baseFontSize,
+      measuredWidth: measuredWidth + rowDecorationWidth,
+      maximumWidth: maximumWidth
+    )
+    let pinSize = CGSize(
+      width: fontSize * WatermarkLayout.locationPinWidthOfFontSize,
+      height: fontSize * WatermarkLayout.locationPinHeightOfFontSize
+    )
+    let textInset = leftInset + fontSize * (
+      WatermarkLayout.locationPinWidthOfFontSize +
+        WatermarkLayout.locationPinGapOfFontSize
+    )
+    let textHeight = try drawTopLeftText(
+      snapshot.locationText,
+      in: context,
+      topY: topY,
+      leftInset: textInset,
+      baseFontSize: fontSize,
+      maximumWidth: maximumWidth - (textInset - leftInset),
+      weight: .medium,
+      maximumLines: 2,
+      alignment: .left
+    )
+    let rowHeight = max(textHeight, pinSize.height)
+    locationPinImage(fontSize: fontSize).draw(
+      in: CGRect(
+        x: leftInset,
+        y: topY + ((rowHeight - pinSize.height) / 2),
+        width: pinSize.width,
+        height: pinSize.height
+      )
+    )
+    return rowHeight
   }
 
   private static func fittedFontSize(
@@ -960,7 +991,7 @@ final class WatermarkBridge {
       return baseFontSize
     }
     let requiredScale = maximumWidth / measuredWidth
-    return baseFontSize * max(0.70, requiredScale)
+    return baseFontSize * max(WatermarkLayout.minimumTextScale, requiredScale)
   }
 
   private static func textAttributes(
@@ -983,7 +1014,10 @@ final class WatermarkBridge {
   }
 
   private static func locationPinImage(fontSize: CGFloat) -> UIImage {
-    let size = CGSize(width: fontSize * 0.58, height: fontSize * 0.86)
+    let size = CGSize(
+      width: fontSize * WatermarkLayout.locationPinWidthOfFontSize,
+      height: fontSize * WatermarkLayout.locationPinHeightOfFontSize
+    )
     let format = UIGraphicsImageRendererFormat()
     format.scale = 1
     format.opaque = false
