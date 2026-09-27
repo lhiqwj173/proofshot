@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -740,26 +739,6 @@ class _CameraScreenState extends State<CameraScreen> {
       _locationFailure?.reason ==
           LocationUnavailableReason.permissionDeniedForever;
 
-  String _flashLabel(FlashMode mode) {
-    if (_cameraCoordinator.captureMode == CameraCaptureMode.video) {
-      return switch (mode) {
-        FlashMode.off => '补光关',
-        FlashMode.torch => '补光开',
-        FlashMode.always || FlashMode.auto => throw StateError(
-          'Photo flash mode is invalid for video capture.',
-        ),
-      };
-    }
-    return switch (mode) {
-      FlashMode.off => '闪光关',
-      FlashMode.always => '闪光开',
-      FlashMode.auto => '闪光自动',
-      FlashMode.torch => throw StateError(
-        'Torch mode is invalid for photo capture.',
-      ),
-    };
-  }
-
   Widget _buildCameraSwitchControl(bool controlsEnabled) {
     final bool canSwitch =
         controlsEnabled && _cameraCoordinator.canSwitchCamera;
@@ -782,36 +761,30 @@ class _CameraScreenState extends State<CameraScreen> {
     final String? unavailableReason = _cameraCoordinator.flashUnavailableReason;
     final bool enabled = controlsEnabled && unavailableReason == null;
     final FlashMode mode = _cameraCoordinator.flashMode;
-    return PopupMenuButton<FlashMode>(
-      enabled: enabled,
-      tooltip: unavailableReason ?? '闪光和补光设置',
-      onSelected: (FlashMode selectedMode) {
-        unawaited(_cameraCoordinator.setFlashMode(selectedMode));
-      },
-      itemBuilder: (BuildContext context) => _cameraCoordinator
-          .supportedFlashModes
-          .map(
-            (FlashMode supportedMode) => PopupMenuItem<FlashMode>(
-              value: supportedMode,
-              child: Text(_flashLabel(supportedMode)),
-            ),
-          )
-          .toList(growable: false),
-      child: Container(
-        height: 46,
-        width: 46,
-        alignment: Alignment.center,
-        child: Icon(
-          mode == FlashMode.off
-              ? Icons.flash_off_rounded
-              : Icons.flash_on_rounded,
-          color: enabled
-              ? mode == FlashMode.off
-                    ? Colors.white
-                    : _cameraYellow
-              : Colors.white38,
-          size: 24,
-        ),
+    final bool isOn = mode != FlashMode.off;
+    final FlashMode enabledMode =
+        _cameraCoordinator.captureMode == CameraCaptureMode.video
+        ? FlashMode.torch
+        : FlashMode.always;
+    return IconButton(
+      tooltip: unavailableReason ?? (isOn ? '关闭闪光灯' : '开启闪光灯'),
+      onPressed: enabled
+          ? () => unawaited(
+              _cameraCoordinator.setFlashMode(
+                isOn ? FlashMode.off : enabledMode,
+              ),
+            )
+          : null,
+      style: IconButton.styleFrom(
+        fixedSize: const Size(46, 46),
+        backgroundColor: Colors.transparent,
+        foregroundColor: isOn ? _cameraYellow : Colors.white,
+        disabledForegroundColor: Colors.white38,
+        shape: const CircleBorder(),
+      ),
+      icon: Icon(
+        isOn ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+        size: 24,
       ),
     );
   }
@@ -1060,52 +1033,29 @@ class _CameraScreenState extends State<CameraScreen> {
     return Row(
       children: <Widget>[
         const Spacer(),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(32),
-            boxShadow: const <BoxShadow>[
-              BoxShadow(
-                color: Color(0x40000000),
-                blurRadius: 10,
-                offset: Offset(0, 3),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(32),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                color: AppPalette.translucentPill,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    _buildFlashControl(cameraState == CameraSessionState.ready),
-                    _buildTopAction(
-                      tooltip: _cameraCoordinator.focusMode == FocusMode.auto
-                          ? '自动对焦'
-                          : '恢复自动对焦',
-                      icon: _cameraCoordinator.focusMode == FocusMode.auto
-                          ? Icons.center_focus_weak
-                          : Icons.center_focus_strong,
-                      onPressed:
-                          _canFocus &&
-                              _cameraCoordinator.focusMode == FocusMode.locked
-                          ? () => unawaited(_restoreAutoFocus())
-                          : null,
-                    ),
-                    _buildLocationControl(cameraState),
-                    _buildTopAction(
-                      tooltip: '设置',
-                      icon: Icons.more_horiz_rounded,
-                      onPressed: _locationLoading ? null : _openSettings,
-                    ),
-                  ],
-                ),
-              ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            _buildFlashControl(cameraState == CameraSessionState.ready),
+            _buildTopAction(
+              tooltip: _cameraCoordinator.focusMode == FocusMode.auto
+                  ? '自动对焦'
+                  : '恢复自动对焦',
+              icon: _cameraCoordinator.focusMode == FocusMode.auto
+                  ? Icons.center_focus_weak
+                  : Icons.center_focus_strong,
+              onPressed:
+                  _canFocus && _cameraCoordinator.focusMode == FocusMode.locked
+                  ? () => unawaited(_restoreAutoFocus())
+                  : null,
             ),
-          ),
+            _buildLocationControl(cameraState),
+            _buildTopAction(
+              tooltip: '设置',
+              icon: Icons.more_horiz_rounded,
+              onPressed: _locationLoading ? null : _openSettings,
+            ),
+          ],
         ),
       ],
     );

@@ -813,7 +813,6 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
       CameraCaptureMode.photo => const <FlashMode>{
         FlashMode.off,
         FlashMode.always,
-        FlashMode.auto,
       },
       CameraCaptureMode.video => const <FlashMode>{
         FlashMode.off,
