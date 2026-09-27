@@ -7,13 +7,14 @@ import 'watermark_snapshot.dart';
 /// Normalized positions and sizes shared with the native media renderer.
 abstract final class WatermarkLayout {
   static const double safeMargin = 0.03;
-  static const double customCenterY = 0.63;
-  static const double timeCenterY = 0.72;
-  static const double metadataCenterY = 0.82;
+  static const double customCenterY = 0.055;
+  static const double timeCenterY = 0.14;
+  static const double metadataCenterY = 0.22;
   static const double timeFontSizeOfShortSide = 0.09;
   static const double metadataFontSizeOfShortSide = 0.035;
   static const double customFontSizeOfShortSide = 0.032;
   static const double brandFontSizeOfShortSide = 0.019;
+  static const double brandTopY = 0.275;
   static const double minimumTextScale = 0.70;
 }
 
@@ -49,18 +50,23 @@ class WatermarkOverlay extends StatelessWidget {
               if (snapshot.customText.isNotEmpty)
                 Align(
                   alignment: Alignment(
-                    0,
+                    -1,
                     (WatermarkLayout.customCenterY * 2) - 1,
                   ),
                   child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: horizontalInset),
-                    child: _WatermarkText(
-                      text: snapshot.customText,
-                      baseFontSize:
-                          shortSide * WatermarkLayout.customFontSizeOfShortSide,
-                      maximumWidth: maximumTextWidth,
-                      maximumLines: 2,
-                      fontWeight: FontWeight.w500,
+                    child: SizedBox(
+                      width: maximumTextWidth,
+                      child: _WatermarkText(
+                        text: snapshot.customText,
+                        baseFontSize:
+                            shortSide *
+                            WatermarkLayout.customFontSizeOfShortSide,
+                        maximumWidth: maximumTextWidth,
+                        maximumLines: 2,
+                        fontWeight: FontWeight.w500,
+                        textAlign: TextAlign.left,
+                      ),
                     ),
                   ),
                 ),
@@ -100,8 +106,8 @@ class WatermarkOverlay extends StatelessWidget {
                 ),
               ),
               Positioned(
-                right: horizontalInset,
-                bottom: canvasSize.height * WatermarkLayout.safeMargin,
+                left: horizontalInset,
+                top: canvasSize.height * WatermarkLayout.brandTopY,
                 child: _WatermarkText(
                   text: snapshot.brandText,
                   baseFontSize:
@@ -110,6 +116,7 @@ class WatermarkOverlay extends StatelessWidget {
                   maximumLines: 1,
                   fontWeight: FontWeight.w500,
                   letterSpacing: 0.4,
+                  textAlign: TextAlign.left,
                 ),
               ),
             ],

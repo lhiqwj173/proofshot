@@ -792,18 +792,19 @@ final class WatermarkBridge {
         snapshot.customText,
         in: context,
         canvasSize: size,
-        centerY: 0.63,
+        centerY: 0.055,
         baseFontSize: shortSide * 0.032,
         maximumWidth: maximumWidth,
         weight: .medium,
-        maximumLines: 2
+        maximumLines: 2,
+        alignment: .left
       )
     }
     try drawCenteredText(
       snapshot.timeText,
       in: context,
       canvasSize: size,
-      centerY: 0.72,
+      centerY: 0.14,
       baseFontSize: shortSide * 0.09,
       maximumWidth: maximumWidth,
       weight: .semibold,
@@ -814,11 +815,17 @@ final class WatermarkBridge {
       snapshot,
       in: context,
       canvasSize: size,
-      centerY: 0.82,
+      centerY: 0.22,
       baseFontSize: shortSide * 0.035,
       maximumWidth: maximumWidth
     )
-    drawBrand(snapshot.brandText, in: context, canvasSize: size, shortSide: shortSide)
+    drawBrand(
+      snapshot.brandText,
+      in: context,
+      canvasSize: size,
+      shortSide: shortSide,
+      topY: 0.275
+    )
   }
 
   private static func drawCenteredText(
@@ -927,17 +934,17 @@ final class WatermarkBridge {
     _ value: String,
     in context: CGContext,
     canvasSize: CGSize,
-    shortSide: CGFloat
+    shortSide: CGFloat,
+    topY: CGFloat
   ) {
     let font = UIFont.systemFont(ofSize: shortSide * 0.019, weight: .medium)
-    var attributes = textAttributes(font: font, alignment: .right)
+    var attributes = textAttributes(font: font, alignment: .left)
     attributes[.kern] = 0.4
     let measuredSize = (value as NSString).size(withAttributes: attributes)
-    let rightInset = canvasSize.width * 0.03
-    let bottomInset = canvasSize.height * 0.03
+    let leftInset = canvasSize.width * 0.03
     let drawingRect = CGRect(
-      x: canvasSize.width - rightInset - measuredSize.width,
-      y: canvasSize.height - bottomInset - measuredSize.height,
+      x: leftInset,
+      y: canvasSize.height * topY,
       width: measuredSize.width,
       height: measuredSize.height
     )
