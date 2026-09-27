@@ -176,14 +176,6 @@ private enum WatermarkLayout {
   static let detailLineSpacingOfShortSide: CGFloat = 0.0025
   static let timeLocationSpacingOfShortSide: CGFloat = 0.013
   static let customBottomSpacingOfShortSide: CGFloat = 0.005
-  static let brandBottomOffsetOfShortSide: CGFloat = 0.008
-  static let locationTrailingClearanceOfShortSide: CGFloat = 0.11
-  static let brandTitleFontSizeOfShortSide: CGFloat = 0.022
-  static let brandSubtitleFontSizeOfShortSide: CGFloat = 0.019
-  static let brandTagFontSizeOfShortSide: CGFloat = 0.016
-  static let brandLineSpacingOfShortSide: CGFloat = 0.0055
-  static let brandTagHorizontalPaddingOfShortSide: CGFloat = 0.005
-  static let brandTagVerticalPaddingOfShortSide: CGFloat = 0.002
   static let minimumTextScale: CGFloat = 0.70
 }
 
@@ -847,9 +839,7 @@ final class WatermarkBridge {
     let detailHeight =
       dateMetrics.bounds.height + detailLineSpacing + weekdayMetrics.bounds.height
     let rowHeight = max(timeMetrics.bounds.height, detailHeight)
-    let locationMaximumWidth = maximumWidth - (
-      shortSide * WatermarkLayout.locationTrailingClearanceOfShortSide
-    )
+    let locationMaximumWidth = maximumWidth
     let locationMetrics = try watermarkTextMetrics(
       snapshot.locationText,
       shortSide: shortSide,
@@ -936,15 +926,6 @@ final class WatermarkBridge {
       )
     }
 
-    try drawWatermarkBrand(
-      in: context,
-      size: size,
-      shortSide: shortSide,
-      inset: inset,
-      bottomY: size.height - bottomInset - (
-        shortSide * WatermarkLayout.brandBottomOffsetOfShortSide
-      )
-    )
   }
 
   private static func watermarkTextMetrics(
@@ -1020,91 +1001,6 @@ final class WatermarkBridge {
       )
     )
     UIGraphicsPopContext()
-  }
-
-  private static func drawWatermarkBrand(
-    in context: CGContext,
-    size: CGSize,
-    shortSide: CGFloat,
-    inset: CGFloat,
-    bottomY: CGFloat
-  ) throws {
-    let maximumWidth = shortSide * 0.5
-    let titleMetrics = try watermarkTextMetrics(
-      "今日水印",
-      shortSide: shortSide,
-      fontSizeRatio: WatermarkLayout.brandTitleFontSizeOfShortSide,
-      maximumWidth: maximumWidth,
-      weight: .bold,
-      maximumLines: 1,
-      alignment: .right
-    )
-    let subtitleMetrics = try watermarkTextMetrics(
-      "— 相机 —",
-      shortSide: shortSide,
-      fontSizeRatio: WatermarkLayout.brandSubtitleFontSizeOfShortSide,
-      maximumWidth: maximumWidth,
-      weight: .semibold,
-      maximumLines: 1,
-      alignment: .right
-    )
-    let tagMetrics = try watermarkTextMetrics(
-      "真实时间",
-      shortSide: shortSide,
-      fontSizeRatio: WatermarkLayout.brandTagFontSizeOfShortSide,
-      maximumWidth: maximumWidth,
-      weight: .semibold,
-      maximumLines: 1,
-      alignment: .center,
-      foregroundColor: UIColor(red: 0.20, green: 0.20, blue: 0.30, alpha: 1)
-    )
-    let horizontalPadding =
-      shortSide * WatermarkLayout.brandTagHorizontalPaddingOfShortSide
-    let verticalPadding =
-      shortSide * WatermarkLayout.brandTagVerticalPaddingOfShortSide
-    let tagWidth = tagMetrics.contentWidth + (horizontalPadding * 2)
-    let tagHeight = tagMetrics.bounds.height + (verticalPadding * 2)
-    let lineSpacing = shortSide * WatermarkLayout.brandLineSpacingOfShortSide
-    let groupHeight = titleMetrics.bounds.height + lineSpacing +
-      subtitleMetrics.bounds.height + lineSpacing + tagHeight
-    let groupTop = bottomY - groupHeight
-    let textLeft = size.width - inset - maximumWidth
-
-    drawText(
-      titleMetrics,
-      in: context,
-      origin: CGPoint(x: textLeft, y: groupTop),
-      maximumWidth: maximumWidth
-    )
-    let subtitleTop = groupTop + titleMetrics.bounds.height + lineSpacing
-    drawText(
-      subtitleMetrics,
-      in: context,
-      origin: CGPoint(x: textLeft, y: subtitleTop),
-      maximumWidth: maximumWidth
-    )
-    let tagTop = subtitleTop + subtitleMetrics.bounds.height + lineSpacing
-    let tagRect = CGRect(
-      x: size.width - inset - tagWidth,
-      y: tagTop,
-      width: tagWidth,
-      height: tagHeight
-    )
-    let tagPath = UIBezierPath(roundedRect: tagRect, cornerRadius: 2)
-    context.addPath(tagPath.cgPath)
-    context.setFillColor(
-      UIColor(red: 0.95, green: 0.94, blue: 1, alpha: 0.87).cgColor
-    )
-    context.fillPath()
-    drawText(
-      tagMetrics,
-      in: context,
-      origin: CGPoint(
-        x: tagRect.minX + horizontalPadding,
-        y: tagTop + verticalPadding
-      ),
-      maximumWidth: tagWidth - (horizontalPadding * 2)
-    )
   }
 
   private static func fittedFontSize(

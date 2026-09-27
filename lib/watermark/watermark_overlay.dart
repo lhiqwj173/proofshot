@@ -19,14 +19,6 @@ abstract final class WatermarkLayout {
   static const double detailLineSpacingOfShortSide = 0.0025;
   static const double timeLocationSpacingOfShortSide = 0.013;
   static const double customBottomSpacingOfShortSide = 0.005;
-  static const double brandBottomOffsetOfShortSide = 0.008;
-  static const double locationTrailingClearanceOfShortSide = 0.11;
-  static const double brandTitleFontSizeOfShortSide = 0.022;
-  static const double brandSubtitleFontSizeOfShortSide = 0.019;
-  static const double brandTagFontSizeOfShortSide = 0.016;
-  static const double brandLineSpacingOfShortSide = 0.0055;
-  static const double brandTagHorizontalPaddingOfShortSide = 0.005;
-  static const double brandTagVerticalPaddingOfShortSide = 0.002;
   static const double minimumTextScale = 0.70;
 }
 
@@ -63,7 +55,7 @@ class WatermarkOverlay extends StatelessWidget {
                 right: inset,
                 bottom: shortSide * WatermarkLayout.bottomInsetOfShortSide,
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Expanded(
                       child: Column(
@@ -173,30 +165,13 @@ class WatermarkOverlay extends StatelessWidget {
                             baseFontSize:
                                 shortSide *
                                 WatermarkLayout.locationFontSizeOfShortSide,
-                            maximumWidth:
-                                maximumTextWidth -
-                                (shortSide *
-                                    WatermarkLayout
-                                        .locationTrailingClearanceOfShortSide),
+                            maximumWidth: maximumTextWidth,
                             maximumLines: 2,
                             fontWeight: FontWeight.w500,
                             textAlign: TextAlign.left,
                           ),
                         ],
                       ),
-                    ),
-                    SizedBox(
-                      width:
-                          shortSide *
-                          WatermarkLayout.dividerTrailingSpaceOfShortSide,
-                    ),
-                    Padding(
-                      padding: EdgeInsets.only(
-                        bottom:
-                            shortSide *
-                            WatermarkLayout.brandBottomOffsetOfShortSide,
-                      ),
-                      child: _WatermarkBrand(shortSide: shortSide),
                     ),
                   ],
                 ),
@@ -205,73 +180,6 @@ class WatermarkOverlay extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _WatermarkBrand extends StatelessWidget {
-  const _WatermarkBrand({required this.shortSide});
-
-  final double shortSide;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: <Widget>[
-        _WatermarkText(
-          text: '今日水印',
-          baseFontSize:
-              shortSide * WatermarkLayout.brandTitleFontSizeOfShortSide,
-          maximumWidth: shortSide * 0.5,
-          maximumLines: 1,
-          fontWeight: FontWeight.w700,
-          textAlign: TextAlign.right,
-        ),
-        SizedBox(
-          height: shortSide * WatermarkLayout.brandLineSpacingOfShortSide,
-        ),
-        _WatermarkText(
-          text: '— 相机 —',
-          baseFontSize:
-              shortSide * WatermarkLayout.brandSubtitleFontSizeOfShortSide,
-          maximumWidth: shortSide * 0.5,
-          maximumLines: 1,
-          fontWeight: FontWeight.w600,
-          textAlign: TextAlign.right,
-        ),
-        SizedBox(
-          height: shortSide * WatermarkLayout.brandLineSpacingOfShortSide,
-        ),
-        DecoratedBox(
-          decoration: const BoxDecoration(
-            color: Color(0xDDF2F0FF),
-            borderRadius: BorderRadius.all(Radius.circular(2)),
-          ),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal:
-                  shortSide *
-                  WatermarkLayout.brandTagHorizontalPaddingOfShortSide,
-              vertical:
-                  shortSide *
-                  WatermarkLayout.brandTagVerticalPaddingOfShortSide,
-            ),
-            child: Text(
-              '真实时间',
-              textScaler: TextScaler.noScaling,
-              style: TextStyle(
-                color: const Color(0xFF34334D),
-                fontSize:
-                    shortSide * WatermarkLayout.brandTagFontSizeOfShortSide,
-                fontWeight: FontWeight.w600,
-                height: 1,
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
