@@ -10,7 +10,7 @@ abstract final class WatermarkLayout {
   static const double customCenterY = 0.63;
   static const double timeCenterY = 0.72;
   static const double metadataCenterY = 0.84;
-  static const double timeFontSizeOfShortSide = 0.14;
+  static const double timeFontSizeOfShortSide = 0.07;
   static const double metadataFontSizeOfShortSide = 0.035;
   static const double customFontSizeOfShortSide = 0.032;
   static const double brandFontSizeOfShortSide = 0.019;
@@ -65,16 +65,20 @@ class WatermarkOverlay extends StatelessWidget {
                   ),
                 ),
               Align(
-                alignment: Alignment(0, (WatermarkLayout.timeCenterY * 2) - 1),
+                alignment: Alignment(-1, (WatermarkLayout.timeCenterY * 2) - 1),
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: horizontalInset),
-                  child: _WatermarkText(
-                    text: snapshot.timeText,
-                    baseFontSize:
-                        shortSide * WatermarkLayout.timeFontSizeOfShortSide,
-                    maximumWidth: maximumTextWidth,
-                    maximumLines: 1,
-                    fontWeight: FontWeight.w600,
+                  child: SizedBox(
+                    width: maximumTextWidth,
+                    child: _WatermarkText(
+                      text: snapshot.timeText,
+                      baseFontSize:
+                          shortSide * WatermarkLayout.timeFontSizeOfShortSide,
+                      maximumWidth: maximumTextWidth,
+                      maximumLines: 1,
+                      fontWeight: FontWeight.w600,
+                      textAlign: TextAlign.left,
+                    ),
                   ),
                 ),
               ),
@@ -186,6 +190,7 @@ class _WatermarkText extends StatelessWidget {
     required this.maximumLines,
     required this.fontWeight,
     this.letterSpacing = 0,
+    this.textAlign = TextAlign.center,
   });
 
   final String text;
@@ -194,6 +199,7 @@ class _WatermarkText extends StatelessWidget {
   final int maximumLines;
   final FontWeight fontWeight;
   final double letterSpacing;
+  final TextAlign textAlign;
 
   @override
   Widget build(BuildContext context) {
@@ -215,7 +221,7 @@ class _WatermarkText extends StatelessWidget {
 
     return Text(
       text,
-      textAlign: TextAlign.center,
+      textAlign: textAlign,
       textDirection: TextDirection.ltr,
       textScaler: TextScaler.noScaling,
       maxLines: maximumLines,

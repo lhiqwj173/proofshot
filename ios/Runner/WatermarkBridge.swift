@@ -804,10 +804,11 @@ final class WatermarkBridge {
       in: context,
       canvasSize: size,
       centerY: 0.72,
-      baseFontSize: shortSide * 0.14,
+      baseFontSize: shortSide * 0.07,
       maximumWidth: maximumWidth,
       weight: .semibold,
-      maximumLines: 1
+      maximumLines: 1,
+      alignment: .left
     )
     try drawMetadata(
       snapshot,
@@ -828,7 +829,8 @@ final class WatermarkBridge {
     baseFontSize: CGFloat,
     maximumWidth: CGFloat,
     weight: UIFont.Weight,
-    maximumLines: Int
+    maximumLines: Int,
+    alignment: NSTextAlignment = .center
   ) throws {
     let baseFont = UIFont.systemFont(ofSize: baseFontSize, weight: weight)
     let measuredWidth = (value as NSString).size(withAttributes: [.font: baseFont]).width
@@ -840,7 +842,7 @@ final class WatermarkBridge {
     let font = UIFont.systemFont(ofSize: fontSize, weight: weight)
     let attributedText = NSMutableAttributedString(
       string: value,
-      attributes: textAttributes(font: font, alignment: .center)
+      attributes: textAttributes(font: font, alignment: alignment)
     )
     let bounds = attributedText.boundingRect(
       with: CGSize(width: maximumWidth, height: CGFloat.greatestFiniteMagnitude),
