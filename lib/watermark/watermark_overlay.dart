@@ -9,8 +9,8 @@ abstract final class WatermarkLayout {
   static const double safeMargin = 0.03;
   static const double customCenterY = 0.63;
   static const double timeCenterY = 0.72;
-  static const double metadataCenterY = 0.84;
-  static const double timeFontSizeOfShortSide = 0.07;
+  static const double metadataCenterY = 0.82;
+  static const double timeFontSizeOfShortSide = 0.09;
   static const double metadataFontSizeOfShortSide = 0.035;
   static const double customFontSizeOfShortSide = 0.032;
   static const double brandFontSizeOfShortSide = 0.019;
@@ -84,15 +84,18 @@ class WatermarkOverlay extends StatelessWidget {
               ),
               Align(
                 alignment: Alignment(
-                  0,
+                  -1,
                   (WatermarkLayout.metadataCenterY * 2) - 1,
                 ),
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: horizontalInset),
-                  child: _WatermarkMetadata(
-                    snapshot: snapshot,
-                    shortSide: shortSide,
-                    maximumWidth: maximumTextWidth,
+                  child: SizedBox(
+                    width: maximumTextWidth,
+                    child: _WatermarkMetadata(
+                      snapshot: snapshot,
+                      shortSide: shortSide,
+                      maximumWidth: maximumTextWidth,
+                    ),
                   ),
                 ),
               ),
@@ -172,7 +175,7 @@ class _WatermarkMetadata extends StatelessWidget {
           TextSpan(text: snapshot.locationText),
         ],
       ),
-      textAlign: TextAlign.center,
+      textAlign: TextAlign.left,
       textDirection: TextDirection.ltr,
       textScaler: TextScaler.noScaling,
       maxLines: 2,

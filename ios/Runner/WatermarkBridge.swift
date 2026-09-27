@@ -804,7 +804,7 @@ final class WatermarkBridge {
       in: context,
       canvasSize: size,
       centerY: 0.72,
-      baseFontSize: shortSide * 0.07,
+      baseFontSize: shortSide * 0.09,
       maximumWidth: maximumWidth,
       weight: .semibold,
       maximumLines: 1,
@@ -814,7 +814,7 @@ final class WatermarkBridge {
       snapshot,
       in: context,
       canvasSize: size,
-      centerY: 0.84,
+      centerY: 0.82,
       baseFontSize: shortSide * 0.035,
       maximumWidth: maximumWidth
     )
@@ -884,7 +884,7 @@ final class WatermarkBridge {
     let font = UIFont.systemFont(ofSize: fontSize, weight: .medium)
     let attributedText = NSMutableAttributedString(
       string: "\(snapshot.dateText)  \(snapshot.weekdayText)  ",
-      attributes: textAttributes(font: font, alignment: .center)
+      attributes: textAttributes(font: font, alignment: .left)
     )
     let marker = NSTextAttachment()
     marker.image = locationPinImage(fontSize: fontSize)
@@ -898,7 +898,7 @@ final class WatermarkBridge {
     attributedText.append(
       NSAttributedString(
         string: snapshot.locationText,
-        attributes: textAttributes(font: font, alignment: .center)
+        attributes: textAttributes(font: font, alignment: .left)
       )
     )
 
