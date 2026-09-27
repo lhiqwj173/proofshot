@@ -163,22 +163,34 @@ private struct WatermarkSnapshotData {
 }
 
 private enum WatermarkLayout {
-  static let safeMarginOfShortSide: CGFloat = 0.06
-  static let topInsetOfShortSide: CGFloat = 0.06
-  static let dateFontSizeOfShortSide: CGFloat = 0.027
-  static let timeFontSizeOfShortSide: CGFloat = 0.09
-  static let locationFontSizeOfShortSide: CGFloat = 0.027
-  static let customFontSizeOfShortSide: CGFloat = 0.032
-  static let brandFontSizeOfShortSide: CGFloat = 0.019
-  static let customBottomSpacingOfShortSide: CGFloat = 0.012
-  static let dateBottomSpacingOfShortSide: CGFloat = 0.0075
-  static let timeBottomSpacingOfShortSide: CGFloat = 0.036
-  static let locationBottomSpacingOfShortSide: CGFloat = 0.025
-  static let locationPinWidthOfFontSize: CGFloat = 0.58
-  static let locationPinHeightOfFontSize: CGFloat = 0.86
-  static let locationPinGapOfFontSize: CGFloat = 0.55
-  static let brandLetterSpacing: CGFloat = 0.4
+  static let horizontalInsetOfShortSide: CGFloat = 0.02
+  static let bottomInsetOfShortSide: CGFloat = 0.02
+  static let timeFontSizeOfShortSide: CGFloat = 0.054
+  static let detailFontSizeOfShortSide: CGFloat = 0.022
+  static let locationFontSizeOfShortSide: CGFloat = 0.0215
+  static let customFontSizeOfShortSide: CGFloat = 0.020
+  static let dividerWidthOfShortSide: CGFloat = 0.0015
+  static let dividerHeightOfShortSide: CGFloat = 0.043
+  static let dividerLeadingSpaceOfShortSide: CGFloat = 0.010
+  static let dividerTrailingSpaceOfShortSide: CGFloat = 0.012
+  static let detailLineSpacingOfShortSide: CGFloat = 0.0025
+  static let timeLocationSpacingOfShortSide: CGFloat = 0.013
+  static let customBottomSpacingOfShortSide: CGFloat = 0.005
+  static let brandBottomOffsetOfShortSide: CGFloat = 0.008
+  static let locationTrailingClearanceOfShortSide: CGFloat = 0.11
+  static let brandTitleFontSizeOfShortSide: CGFloat = 0.022
+  static let brandSubtitleFontSizeOfShortSide: CGFloat = 0.019
+  static let brandTagFontSizeOfShortSide: CGFloat = 0.016
+  static let brandLineSpacingOfShortSide: CGFloat = 0.0055
+  static let brandTagHorizontalPaddingOfShortSide: CGFloat = 0.005
+  static let brandTagVerticalPaddingOfShortSide: CGFloat = 0.002
   static let minimumTextScale: CGFloat = 0.70
+}
+
+private struct WatermarkTextMetrics {
+  let attributedText: NSAttributedString
+  let bounds: CGRect
+  let contentWidth: CGFloat
 }
 
 private struct PhotoRenderRequest {
@@ -803,85 +815,150 @@ final class WatermarkBridge {
     size: CGSize
   ) throws {
     let shortSide = min(size.width, size.height)
-    let inset = shortSide * WatermarkLayout.safeMarginOfShortSide
+    let inset = shortSide * WatermarkLayout.horizontalInsetOfShortSide
     let maximumWidth = size.width - (inset * 2)
-    var topY = shortSide * WatermarkLayout.topInsetOfShortSide
-
-    if !snapshot.customText.isEmpty {
-      topY += try drawTopLeftText(
-        snapshot.customText,
-        in: context,
-        topY: topY,
-        leftInset: inset,
-        baseFontSize: shortSide * WatermarkLayout.customFontSizeOfShortSide,
-        maximumWidth: maximumWidth,
-        weight: .medium,
-        maximumLines: 2,
-        alignment: .left
-      )
-      topY += shortSide * WatermarkLayout.customBottomSpacingOfShortSide
-    }
-    topY += try drawTopLeftText(
-      "\(snapshot.dateText)  ·  \(snapshot.weekdayText)",
-      in: context,
-      topY: topY,
-      leftInset: inset,
-      baseFontSize: shortSide * WatermarkLayout.dateFontSizeOfShortSide,
+    let bottomInset = shortSide * WatermarkLayout.bottomInsetOfShortSide
+    let detailLineSpacing = shortSide * WatermarkLayout.detailLineSpacingOfShortSide
+    let timeMetrics = try watermarkTextMetrics(
+      snapshot.timeText,
+      shortSide: shortSide,
+      fontSizeRatio: WatermarkLayout.timeFontSizeOfShortSide,
+      maximumWidth: maximumWidth,
+      weight: .bold,
+      maximumLines: 1
+    )
+    let dateText = snapshot.dateText.replacingOccurrences(of: ".", with: "-")
+    let dateMetrics = try watermarkTextMetrics(
+      dateText,
+      shortSide: shortSide,
+      fontSizeRatio: WatermarkLayout.detailFontSizeOfShortSide,
       maximumWidth: maximumWidth,
       weight: .medium,
-      maximumLines: 1,
-      alignment: .left
+      maximumLines: 1
     )
-    topY += shortSide * WatermarkLayout.dateBottomSpacingOfShortSide
-    topY += try drawTopLeftText(
-      snapshot.timeText,
-      in: context,
-      topY: topY,
-      leftInset: inset,
-      baseFontSize: shortSide * WatermarkLayout.timeFontSizeOfShortSide,
-      maximumWidth: maximumWidth,
-      weight: .semibold,
-      maximumLines: 1,
-      alignment: .left
-    )
-    topY += shortSide * WatermarkLayout.timeBottomSpacingOfShortSide
-    topY += try drawLocation(
-      snapshot,
-      in: context,
-      topY: topY,
-      leftInset: inset,
+    let weekdayMetrics = try watermarkTextMetrics(
+      snapshot.weekdayText,
       shortSide: shortSide,
+      fontSizeRatio: WatermarkLayout.detailFontSizeOfShortSide,
+      maximumWidth: maximumWidth,
+      weight: .medium,
+      maximumLines: 1
+    )
+    let detailHeight =
+      dateMetrics.bounds.height + detailLineSpacing + weekdayMetrics.bounds.height
+    let rowHeight = max(timeMetrics.bounds.height, detailHeight)
+    let locationMaximumWidth = maximumWidth - (
+      shortSide * WatermarkLayout.locationTrailingClearanceOfShortSide
+    )
+    let locationMetrics = try watermarkTextMetrics(
+      snapshot.locationText,
+      shortSide: shortSide,
+      fontSizeRatio: WatermarkLayout.locationFontSizeOfShortSide,
+      maximumWidth: locationMaximumWidth,
+      weight: .medium,
+      maximumLines: 2
+    )
+    let locationTop = size.height - bottomInset - locationMetrics.bounds.height
+    let rowBottom = locationTop - (
+      shortSide * WatermarkLayout.timeLocationSpacingOfShortSide
+    )
+    let rowTop = rowBottom - rowHeight
+
+    drawText(
+      timeMetrics,
+      in: context,
+      origin: CGPoint(x: inset, y: rowBottom - timeMetrics.bounds.height),
       maximumWidth: maximumWidth
     )
-    topY += shortSide * WatermarkLayout.locationBottomSpacingOfShortSide
-    _ = try drawTopLeftText(
-      snapshot.brandText,
+
+    let dividerX = inset + timeMetrics.contentWidth + (
+      shortSide * WatermarkLayout.dividerLeadingSpaceOfShortSide
+    )
+    let dividerWidth = shortSide * WatermarkLayout.dividerWidthOfShortSide
+    let dividerHeight = shortSide * WatermarkLayout.dividerHeightOfShortSide
+    let dividerY = rowTop + ((rowHeight - dividerHeight) / 2)
+    context.setFillColor(UIColor(red: 0.90, green: 0.78, blue: 0.29, alpha: 1).cgColor)
+    context.fill(
+      CGRect(
+        x: dividerX,
+        y: dividerY,
+        width: dividerWidth,
+        height: dividerHeight
+      )
+    )
+
+    let detailX = dividerX + dividerWidth + (
+      shortSide * WatermarkLayout.dividerTrailingSpaceOfShortSide
+    )
+    let detailTop = rowTop + ((rowHeight - detailHeight) / 2)
+    let detailMaximumWidth = size.width - inset - detailX
+    drawText(
+      dateMetrics,
       in: context,
-      topY: topY,
-      leftInset: inset,
-      baseFontSize: shortSide * WatermarkLayout.brandFontSizeOfShortSide,
-      maximumWidth: maximumWidth,
-      weight: .medium,
-      maximumLines: 1,
-      alignment: .left,
-      foregroundColor: UIColor.white.withAlphaComponent(0.8),
-      letterSpacing: WatermarkLayout.brandLetterSpacing
+      origin: CGPoint(x: detailX, y: detailTop),
+      maximumWidth: detailMaximumWidth
+    )
+    drawText(
+      weekdayMetrics,
+      in: context,
+      origin: CGPoint(
+        x: detailX,
+        y: detailTop + dateMetrics.bounds.height + detailLineSpacing
+      ),
+      maximumWidth: detailMaximumWidth
+    )
+    drawText(
+      locationMetrics,
+      in: context,
+      origin: CGPoint(x: inset, y: locationTop),
+      maximumWidth: locationMaximumWidth
+    )
+
+    if !snapshot.customText.isEmpty {
+      let customMetrics = try watermarkTextMetrics(
+        snapshot.customText,
+        shortSide: shortSide,
+        fontSizeRatio: WatermarkLayout.customFontSizeOfShortSide,
+        maximumWidth: maximumWidth,
+        weight: .medium,
+        maximumLines: 2
+      )
+      drawText(
+        customMetrics,
+        in: context,
+        origin: CGPoint(
+          x: inset,
+          y: rowTop -
+            (shortSide * WatermarkLayout.customBottomSpacingOfShortSide) -
+            customMetrics.bounds.height
+        ),
+        maximumWidth: maximumWidth
+      )
+    }
+
+    try drawWatermarkBrand(
+      in: context,
+      size: size,
+      shortSide: shortSide,
+      inset: inset,
+      bottomY: size.height - bottomInset - (
+        shortSide * WatermarkLayout.brandBottomOffsetOfShortSide
+      )
     )
   }
 
-  private static func drawTopLeftText(
+  private static func watermarkTextMetrics(
     _ value: String,
-    in context: CGContext,
-    topY: CGFloat,
-    leftInset: CGFloat,
-    baseFontSize: CGFloat,
+    shortSide: CGFloat,
+    fontSizeRatio: CGFloat,
     maximumWidth: CGFloat,
     weight: UIFont.Weight,
     maximumLines: Int,
     alignment: NSTextAlignment = .left,
     foregroundColor: UIColor = .white,
     letterSpacing: CGFloat = 0
-  ) throws -> CGFloat {
+  ) throws -> WatermarkTextMetrics {
+    let baseFontSize = shortSide * fontSizeRatio
     let baseFont = UIFont.systemFont(ofSize: baseFontSize, weight: weight)
     let measuredWidth = (value as NSString).size(
       withAttributes: [.font: baseFont, .kern: letterSpacing]
@@ -919,67 +996,115 @@ final class WatermarkBridge {
         "Watermark text exceeds its \(maximumLines)-line layout limit."
       )
     }
-    attributedText.draw(
-      in: CGRect(
-        x: leftInset,
-        y: topY,
-        width: maximumWidth,
-        height: bounds.height
-      )
+    let contentWidth = (value as NSString).size(
+      withAttributes: attributedText.attributes(at: 0, effectiveRange: nil)
+    ).width
+    return WatermarkTextMetrics(
+      attributedText: attributedText,
+      bounds: bounds,
+      contentWidth: contentWidth
     )
-    return bounds.height
   }
 
-  private static func drawLocation(
-    _ snapshot: WatermarkSnapshotData,
+  private static func drawText(
+    _ metrics: WatermarkTextMetrics,
     in context: CGContext,
-    topY: CGFloat,
-    leftInset: CGFloat,
-    shortSide: CGFloat,
+    origin: CGPoint,
     maximumWidth: CGFloat
-  ) throws -> CGFloat {
-    let baseFontSize = shortSide * WatermarkLayout.locationFontSizeOfShortSide
-    let baseFont = UIFont.systemFont(ofSize: baseFontSize, weight: .medium)
-    let measuredWidth = (snapshot.locationText as NSString)
-      .size(withAttributes: [.font: baseFont]).width
-    let rowDecorationWidth = baseFontSize * (
-      WatermarkLayout.locationPinWidthOfFontSize +
-        WatermarkLayout.locationPinGapOfFontSize
-    )
-    let fontSize = fittedFontSize(
-      baseFontSize: baseFontSize,
-      measuredWidth: measuredWidth + rowDecorationWidth,
-      maximumWidth: maximumWidth
-    )
-    let pinSize = CGSize(
-      width: fontSize * WatermarkLayout.locationPinWidthOfFontSize,
-      height: fontSize * WatermarkLayout.locationPinHeightOfFontSize
-    )
-    let textInset = leftInset + fontSize * (
-      WatermarkLayout.locationPinWidthOfFontSize +
-        WatermarkLayout.locationPinGapOfFontSize
-    )
-    let textHeight = try drawTopLeftText(
-      snapshot.locationText,
-      in: context,
-      topY: topY,
-      leftInset: textInset,
-      baseFontSize: fontSize,
-      maximumWidth: maximumWidth - (textInset - leftInset),
-      weight: .medium,
-      maximumLines: 2,
-      alignment: .left
-    )
-    let rowHeight = max(textHeight, pinSize.height)
-    locationPinImage(fontSize: fontSize).draw(
+  ) {
+    UIGraphicsPushContext(context)
+    metrics.attributedText.draw(
       in: CGRect(
-        x: leftInset,
-        y: topY + ((rowHeight - pinSize.height) / 2),
-        width: pinSize.width,
-        height: pinSize.height
+        origin: origin,
+        size: CGSize(width: maximumWidth, height: metrics.bounds.height)
       )
     )
-    return rowHeight
+    UIGraphicsPopContext()
+  }
+
+  private static func drawWatermarkBrand(
+    in context: CGContext,
+    size: CGSize,
+    shortSide: CGFloat,
+    inset: CGFloat,
+    bottomY: CGFloat
+  ) throws {
+    let maximumWidth = shortSide * 0.5
+    let titleMetrics = try watermarkTextMetrics(
+      "今日水印",
+      shortSide: shortSide,
+      fontSizeRatio: WatermarkLayout.brandTitleFontSizeOfShortSide,
+      maximumWidth: maximumWidth,
+      weight: .bold,
+      maximumLines: 1,
+      alignment: .right
+    )
+    let subtitleMetrics = try watermarkTextMetrics(
+      "— 相机 —",
+      shortSide: shortSide,
+      fontSizeRatio: WatermarkLayout.brandSubtitleFontSizeOfShortSide,
+      maximumWidth: maximumWidth,
+      weight: .semibold,
+      maximumLines: 1,
+      alignment: .right
+    )
+    let tagMetrics = try watermarkTextMetrics(
+      "真实时间",
+      shortSide: shortSide,
+      fontSizeRatio: WatermarkLayout.brandTagFontSizeOfShortSide,
+      maximumWidth: maximumWidth,
+      weight: .semibold,
+      maximumLines: 1,
+      alignment: .center,
+      foregroundColor: UIColor(red: 0.20, green: 0.20, blue: 0.30, alpha: 1)
+    )
+    let horizontalPadding =
+      shortSide * WatermarkLayout.brandTagHorizontalPaddingOfShortSide
+    let verticalPadding =
+      shortSide * WatermarkLayout.brandTagVerticalPaddingOfShortSide
+    let tagWidth = tagMetrics.contentWidth + (horizontalPadding * 2)
+    let tagHeight = tagMetrics.bounds.height + (verticalPadding * 2)
+    let lineSpacing = shortSide * WatermarkLayout.brandLineSpacingOfShortSide
+    let groupHeight = titleMetrics.bounds.height + lineSpacing +
+      subtitleMetrics.bounds.height + lineSpacing + tagHeight
+    let groupTop = bottomY - groupHeight
+    let textLeft = size.width - inset - maximumWidth
+
+    drawText(
+      titleMetrics,
+      in: context,
+      origin: CGPoint(x: textLeft, y: groupTop),
+      maximumWidth: maximumWidth
+    )
+    let subtitleTop = groupTop + titleMetrics.bounds.height + lineSpacing
+    drawText(
+      subtitleMetrics,
+      in: context,
+      origin: CGPoint(x: textLeft, y: subtitleTop),
+      maximumWidth: maximumWidth
+    )
+    let tagTop = subtitleTop + subtitleMetrics.bounds.height + lineSpacing
+    let tagRect = CGRect(
+      x: size.width - inset - tagWidth,
+      y: tagTop,
+      width: tagWidth,
+      height: tagHeight
+    )
+    let tagPath = UIBezierPath(roundedRect: tagRect, cornerRadius: 2)
+    context.addPath(tagPath.cgPath)
+    context.setFillColor(
+      UIColor(red: 0.95, green: 0.94, blue: 1, alpha: 0.87).cgColor
+    )
+    context.fillPath()
+    drawText(
+      tagMetrics,
+      in: context,
+      origin: CGPoint(
+        x: tagRect.minX + horizontalPadding,
+        y: tagTop + verticalPadding
+      ),
+      maximumWidth: tagWidth - (horizontalPadding * 2)
+    )
   }
 
   private static func fittedFontSize(
@@ -1011,43 +1136,6 @@ final class WatermarkBridge {
       .paragraphStyle: paragraphStyle,
       .shadow: shadow,
     ]
-  }
-
-  private static func locationPinImage(fontSize: CGFloat) -> UIImage {
-    let size = CGSize(
-      width: fontSize * WatermarkLayout.locationPinWidthOfFontSize,
-      height: fontSize * WatermarkLayout.locationPinHeightOfFontSize
-    )
-    let format = UIGraphicsImageRendererFormat()
-    format.scale = 1
-    format.opaque = false
-    let renderer = UIGraphicsImageRenderer(size: size, format: format)
-    return renderer.image { _ in
-      let centerX = size.width / 2
-      let pin = UIBezierPath()
-      pin.move(to: CGPoint(x: centerX, y: 0))
-      pin.addCurve(
-        to: CGPoint(x: centerX, y: size.height),
-        controlPoint1: CGPoint(x: size.width * 0.92, y: 0),
-        controlPoint2: CGPoint(x: size.width, y: size.height * 0.18)
-      )
-      pin.addCurve(
-        to: CGPoint(x: centerX, y: 0),
-        controlPoint1: CGPoint(x: 0, y: size.height * 0.18),
-        controlPoint2: CGPoint(x: size.width * 0.08, y: 0)
-      )
-      UIColor(red: 0.90, green: 0.22, blue: 0.21, alpha: 1).setFill()
-      pin.fill()
-      UIColor.white.setFill()
-      UIBezierPath(
-        ovalIn: CGRect(
-          x: centerX - size.width * 0.14,
-          y: size.height * 0.28 - size.width * 0.14,
-          width: size.width * 0.28,
-          height: size.width * 0.28
-        )
-      ).fill()
-    }
   }
 
   private static func flutterError(for error: Error) -> FlutterError {

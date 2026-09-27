@@ -6,20 +6,27 @@ import 'watermark_snapshot.dart';
 
 /// Normalized positions and sizes shared with the native media renderer.
 abstract final class WatermarkLayout {
-  static const double safeMarginOfShortSide = 0.06;
-  static const double topInsetOfShortSide = 0.06;
-  static const double dateFontSizeOfShortSide = 0.027;
-  static const double timeFontSizeOfShortSide = 0.09;
-  static const double locationFontSizeOfShortSide = 0.027;
-  static const double customFontSizeOfShortSide = 0.032;
-  static const double brandFontSizeOfShortSide = 0.019;
-  static const double customBottomSpacingOfShortSide = 0.012;
-  static const double dateBottomSpacingOfShortSide = 0.0075;
-  static const double timeBottomSpacingOfShortSide = 0.036;
-  static const double locationBottomSpacingOfShortSide = 0.025;
-  static const double locationPinWidthOfFontSize = 0.58;
-  static const double locationPinHeightOfFontSize = 0.86;
-  static const double locationPinGapOfFontSize = 0.55;
+  static const double horizontalInsetOfShortSide = 0.02;
+  static const double bottomInsetOfShortSide = 0.02;
+  static const double timeFontSizeOfShortSide = 0.054;
+  static const double detailFontSizeOfShortSide = 0.022;
+  static const double locationFontSizeOfShortSide = 0.0215;
+  static const double customFontSizeOfShortSide = 0.020;
+  static const double dividerWidthOfShortSide = 0.0015;
+  static const double dividerHeightOfShortSide = 0.043;
+  static const double dividerLeadingSpaceOfShortSide = 0.010;
+  static const double dividerTrailingSpaceOfShortSide = 0.012;
+  static const double detailLineSpacingOfShortSide = 0.0025;
+  static const double timeLocationSpacingOfShortSide = 0.013;
+  static const double customBottomSpacingOfShortSide = 0.005;
+  static const double brandBottomOffsetOfShortSide = 0.008;
+  static const double locationTrailingClearanceOfShortSide = 0.11;
+  static const double brandTitleFontSizeOfShortSide = 0.022;
+  static const double brandSubtitleFontSizeOfShortSide = 0.019;
+  static const double brandTagFontSizeOfShortSide = 0.016;
+  static const double brandLineSpacingOfShortSide = 0.0055;
+  static const double brandTagHorizontalPaddingOfShortSide = 0.005;
+  static const double brandTagVerticalPaddingOfShortSide = 0.002;
   static const double minimumTextScale = 0.70;
 }
 
@@ -43,7 +50,8 @@ class WatermarkOverlay extends StatelessWidget {
         }
 
         final double shortSide = math.min(canvasSize.width, canvasSize.height);
-        final double inset = shortSide * WatermarkLayout.safeMarginOfShortSide;
+        final double inset =
+            shortSide * WatermarkLayout.horizontalInsetOfShortSide;
         final double maximumTextWidth = canvasSize.width - (inset * 2);
 
         return IgnorePointer(
@@ -52,77 +60,143 @@ class WatermarkOverlay extends StatelessWidget {
             children: <Widget>[
               Positioned(
                 left: inset,
-                top: shortSide * WatermarkLayout.topInsetOfShortSide,
                 right: inset,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                bottom: shortSide * WatermarkLayout.bottomInsetOfShortSide,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: <Widget>[
-                    if (snapshot.customText.isNotEmpty) ...<Widget>[
-                      _WatermarkText(
-                        text: snapshot.customText,
-                        baseFontSize:
-                            shortSide *
-                            WatermarkLayout.customFontSizeOfShortSide,
-                        maximumWidth: maximumTextWidth,
-                        maximumLines: 2,
-                        fontWeight: FontWeight.w500,
-                        textAlign: TextAlign.left,
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          if (snapshot.customText.isNotEmpty) ...<Widget>[
+                            _WatermarkText(
+                              text: snapshot.customText,
+                              baseFontSize:
+                                  shortSide *
+                                  WatermarkLayout.customFontSizeOfShortSide,
+                              maximumWidth: maximumTextWidth,
+                              maximumLines: 2,
+                              fontWeight: FontWeight.w500,
+                              textAlign: TextAlign.left,
+                            ),
+                            SizedBox(
+                              height:
+                                  shortSide *
+                                  WatermarkLayout
+                                      .customBottomSpacingOfShortSide,
+                            ),
+                          ],
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: <Widget>[
+                              _WatermarkText(
+                                text: snapshot.timeText,
+                                baseFontSize:
+                                    shortSide *
+                                    WatermarkLayout.timeFontSizeOfShortSide,
+                                maximumWidth: maximumTextWidth,
+                                maximumLines: 1,
+                                fontWeight: FontWeight.w700,
+                                textAlign: TextAlign.left,
+                              ),
+                              SizedBox(
+                                width:
+                                    shortSide *
+                                    WatermarkLayout
+                                        .dividerLeadingSpaceOfShortSide,
+                              ),
+                              Container(
+                                width:
+                                    shortSide *
+                                    WatermarkLayout.dividerWidthOfShortSide,
+                                height:
+                                    shortSide *
+                                    WatermarkLayout.dividerHeightOfShortSide,
+                                color: const Color(0xFFE5C84B),
+                              ),
+                              SizedBox(
+                                width:
+                                    shortSide *
+                                    WatermarkLayout
+                                        .dividerTrailingSpaceOfShortSide,
+                              ),
+                              Expanded(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    _WatermarkText(
+                                      text: snapshot.dateText.replaceAll(
+                                        '.',
+                                        '-',
+                                      ),
+                                      baseFontSize:
+                                          shortSide *
+                                          WatermarkLayout
+                                              .detailFontSizeOfShortSide,
+                                      maximumWidth: maximumTextWidth,
+                                      maximumLines: 1,
+                                      fontWeight: FontWeight.w500,
+                                      textAlign: TextAlign.left,
+                                    ),
+                                    SizedBox(
+                                      height:
+                                          shortSide *
+                                          WatermarkLayout
+                                              .detailLineSpacingOfShortSide,
+                                    ),
+                                    _WatermarkText(
+                                      text: snapshot.weekdayText,
+                                      baseFontSize:
+                                          shortSide *
+                                          WatermarkLayout
+                                              .detailFontSizeOfShortSide,
+                                      maximumWidth: maximumTextWidth,
+                                      maximumLines: 1,
+                                      fontWeight: FontWeight.w500,
+                                      textAlign: TextAlign.left,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(
+                            height:
+                                shortSide *
+                                WatermarkLayout.timeLocationSpacingOfShortSide,
+                          ),
+                          _WatermarkText(
+                            text: snapshot.locationText,
+                            baseFontSize:
+                                shortSide *
+                                WatermarkLayout.locationFontSizeOfShortSide,
+                            maximumWidth:
+                                maximumTextWidth -
+                                (shortSide *
+                                    WatermarkLayout
+                                        .locationTrailingClearanceOfShortSide),
+                            maximumLines: 2,
+                            fontWeight: FontWeight.w500,
+                            textAlign: TextAlign.left,
+                          ),
+                        ],
                       ),
-                      SizedBox(
-                        height:
+                    ),
+                    SizedBox(
+                      width:
+                          shortSide *
+                          WatermarkLayout.dividerTrailingSpaceOfShortSide,
+                    ),
+                    Padding(
+                      padding: EdgeInsets.only(
+                        bottom:
                             shortSide *
-                            WatermarkLayout.customBottomSpacingOfShortSide,
+                            WatermarkLayout.brandBottomOffsetOfShortSide,
                       ),
-                    ],
-                    _WatermarkText(
-                      text: '${snapshot.dateText}  ·  ${snapshot.weekdayText}',
-                      baseFontSize:
-                          shortSide * WatermarkLayout.dateFontSizeOfShortSide,
-                      maximumWidth: maximumTextWidth,
-                      maximumLines: 1,
-                      fontWeight: FontWeight.w500,
-                      textAlign: TextAlign.left,
-                    ),
-                    SizedBox(
-                      height:
-                          shortSide *
-                          WatermarkLayout.dateBottomSpacingOfShortSide,
-                    ),
-                    _WatermarkText(
-                      text: snapshot.timeText,
-                      baseFontSize:
-                          shortSide * WatermarkLayout.timeFontSizeOfShortSide,
-                      maximumWidth: maximumTextWidth,
-                      maximumLines: 1,
-                      fontWeight: FontWeight.w600,
-                      textAlign: TextAlign.left,
-                    ),
-                    SizedBox(
-                      height:
-                          shortSide *
-                          WatermarkLayout.timeBottomSpacingOfShortSide,
-                    ),
-                    _WatermarkLocationRow(
-                      text: snapshot.locationText,
-                      shortSide: shortSide,
-                      maximumWidth: maximumTextWidth,
-                    ),
-                    SizedBox(
-                      height:
-                          shortSide *
-                          WatermarkLayout.locationBottomSpacingOfShortSide,
-                    ),
-                    _WatermarkText(
-                      text: snapshot.brandText,
-                      baseFontSize:
-                          shortSide * WatermarkLayout.brandFontSizeOfShortSide,
-                      maximumWidth: maximumTextWidth,
-                      maximumLines: 1,
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 0.4,
-                      textAlign: TextAlign.left,
-                      color: const Color(0xCCFFFFFF),
+                      child: _WatermarkBrand(shortSide: shortSide),
                     ),
                   ],
                 ),
@@ -135,66 +209,66 @@ class WatermarkOverlay extends StatelessWidget {
   }
 }
 
-class _WatermarkLocationRow extends StatelessWidget {
-  const _WatermarkLocationRow({
-    required this.text,
-    required this.shortSide,
-    required this.maximumWidth,
-  });
+class _WatermarkBrand extends StatelessWidget {
+  const _WatermarkBrand({required this.shortSide});
 
-  final String text;
   final double shortSide;
-  final double maximumWidth;
 
   @override
   Widget build(BuildContext context) {
-    final double baseFontSize =
-        shortSide * WatermarkLayout.locationFontSizeOfShortSide;
-    final TextStyle baseStyle = _watermarkTextStyle(
-      fontSize: baseFontSize,
-      fontWeight: FontWeight.w500,
-    );
-    final TextPainter measurement = TextPainter(
-      text: TextSpan(text: text, style: baseStyle),
-      textDirection: TextDirection.ltr,
-      maxLines: 2,
-    )..layout();
-    final double rowDecorationWidth =
-        baseFontSize *
-        (WatermarkLayout.locationPinWidthOfFontSize +
-            WatermarkLayout.locationPinGapOfFontSize);
-    final double fontSize = _fitFontSize(
-      baseFontSize: baseFontSize,
-      measuredWidth: measurement.width + rowDecorationWidth,
-      maximumWidth: maximumWidth,
-    );
-    final double locationTextWidth =
-        maximumWidth -
-        fontSize *
-            (WatermarkLayout.locationPinWidthOfFontSize +
-                WatermarkLayout.locationPinGapOfFontSize);
-
-    return Row(
+    return Column(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: <Widget>[
-        CustomPaint(
-          size: Size(
-            fontSize * WatermarkLayout.locationPinWidthOfFontSize,
-            fontSize * WatermarkLayout.locationPinHeightOfFontSize,
-          ),
-          painter: const _LocationPinPainter(),
+        _WatermarkText(
+          text: '今日水印',
+          baseFontSize:
+              shortSide * WatermarkLayout.brandTitleFontSizeOfShortSide,
+          maximumWidth: shortSide * 0.5,
+          maximumLines: 1,
+          fontWeight: FontWeight.w700,
+          textAlign: TextAlign.right,
         ),
-        SizedBox(width: fontSize * WatermarkLayout.locationPinGapOfFontSize),
         SizedBox(
-          width: locationTextWidth,
-          child: _WatermarkText(
-            text: text,
-            baseFontSize: fontSize,
-            maximumWidth: locationTextWidth,
-            maximumLines: 2,
-            fontWeight: FontWeight.w500,
-            textAlign: TextAlign.left,
+          height: shortSide * WatermarkLayout.brandLineSpacingOfShortSide,
+        ),
+        _WatermarkText(
+          text: '— 相机 —',
+          baseFontSize:
+              shortSide * WatermarkLayout.brandSubtitleFontSizeOfShortSide,
+          maximumWidth: shortSide * 0.5,
+          maximumLines: 1,
+          fontWeight: FontWeight.w600,
+          textAlign: TextAlign.right,
+        ),
+        SizedBox(
+          height: shortSide * WatermarkLayout.brandLineSpacingOfShortSide,
+        ),
+        DecoratedBox(
+          decoration: const BoxDecoration(
+            color: Color(0xDDF2F0FF),
+            borderRadius: BorderRadius.all(Radius.circular(2)),
+          ),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal:
+                  shortSide *
+                  WatermarkLayout.brandTagHorizontalPaddingOfShortSide,
+              vertical:
+                  shortSide *
+                  WatermarkLayout.brandTagVerticalPaddingOfShortSide,
+            ),
+            child: Text(
+              '真实时间',
+              textScaler: TextScaler.noScaling,
+              style: TextStyle(
+                color: const Color(0xFF34334D),
+                fontSize:
+                    shortSide * WatermarkLayout.brandTagFontSizeOfShortSide,
+                fontWeight: FontWeight.w600,
+                height: 1,
+              ),
+            ),
           ),
         ),
       ],
@@ -209,9 +283,7 @@ class _WatermarkText extends StatelessWidget {
     required this.maximumWidth,
     required this.maximumLines,
     required this.fontWeight,
-    this.letterSpacing = 0,
     this.textAlign = TextAlign.center,
-    this.color = Colors.white,
   });
 
   final String text;
@@ -219,17 +291,13 @@ class _WatermarkText extends StatelessWidget {
   final double maximumWidth;
   final int maximumLines;
   final FontWeight fontWeight;
-  final double letterSpacing;
   final TextAlign textAlign;
-  final Color color;
 
   @override
   Widget build(BuildContext context) {
     final TextStyle baseStyle = _watermarkTextStyle(
       fontSize: baseFontSize,
       fontWeight: fontWeight,
-      letterSpacing: letterSpacing,
-      color: color,
     );
     final TextPainter measurement = TextPainter(
       text: TextSpan(text: text, style: baseStyle),
@@ -250,12 +318,7 @@ class _WatermarkText extends StatelessWidget {
       maxLines: maximumLines,
       softWrap: true,
       overflow: TextOverflow.clip,
-      style: _watermarkTextStyle(
-        fontSize: fontSize,
-        fontWeight: fontWeight,
-        letterSpacing: letterSpacing,
-        color: color,
-      ),
+      style: _watermarkTextStyle(fontSize: fontSize, fontWeight: fontWeight),
     );
   }
 }
@@ -276,45 +339,12 @@ double _fitFontSize({
 TextStyle _watermarkTextStyle({
   required double fontSize,
   required FontWeight fontWeight,
-  double letterSpacing = 0,
-  Color color = Colors.white,
 }) => TextStyle(
-  color: color,
+  color: Colors.white,
   fontSize: fontSize,
   fontWeight: fontWeight,
   height: 1.0,
-  letterSpacing: letterSpacing,
   shadows: const <Shadow>[
     Shadow(color: Color(0xB3000000), offset: Offset(0, 1), blurRadius: 2),
   ],
 );
-
-class _LocationPinPainter extends CustomPainter {
-  const _LocationPinPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final double centerX = size.width / 2;
-    final Path pin = Path()
-      ..moveTo(centerX, 0)
-      ..cubicTo(
-        size.width * 0.92,
-        0,
-        size.width,
-        size.height * 0.18,
-        centerX,
-        size.height,
-      )
-      ..cubicTo(0, size.height * 0.18, size.width * 0.08, 0, centerX, 0)
-      ..close();
-    canvas.drawPath(pin, Paint()..color = const Color(0xFFE53935));
-    canvas.drawCircle(
-      Offset(centerX, size.height * 0.28),
-      size.width * 0.14,
-      Paint()..color = Colors.white,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_LocationPinPainter oldDelegate) => false;
-}
