@@ -493,6 +493,7 @@ final class DefaultCamera: NSObject, Camera {
     }
 
     try? AVAudioSession.sharedInstance().setCategory(finalCategory, options: finalOptions)
+    try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
   }
 
   func reportInitializationState() {

@@ -1,3 +1,4 @@
+import AVFoundation
 import AVKit
 import Contacts
 import Flutter
@@ -50,6 +51,7 @@ private final class CaptureHaptics {
         return
       }
       DispatchQueue.main.async {
+        try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
         let generator = UIImpactFeedbackGenerator(style: .light)
         generator.prepare()
         generator.impactOccurred()
