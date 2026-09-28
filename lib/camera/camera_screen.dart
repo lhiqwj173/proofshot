@@ -313,7 +313,6 @@ class _CameraScreenState extends State<CameraScreen> {
       final String location = _locationForCapture();
       final WatermarkSnapshot snapshot = _snapshotAt(location, DateTime.now());
       final XFile source = await _cameraCoordinator.takePicture();
-      await _updateRecentThumbnail(source.path, 'photo');
       await _processCapturedMedia(source, snapshot, 'photo');
     } on Object catch (error) {
       _showMediaError(error);
@@ -864,7 +863,8 @@ class _CameraScreenState extends State<CameraScreen> {
         : _cameraCoordinator.captureMode == CameraCaptureMode.photo
         ? '拍摄照片'
         : '开始录像';
-    final Widget centerMark = _mediaBusy
+    final Widget centerMark =
+        _mediaBusy || cameraState == CameraSessionState.processing
         ? const SizedBox.square(
             dimension: 28,
             child: CircularProgressIndicator(

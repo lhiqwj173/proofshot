@@ -53,6 +53,9 @@ protocol CapturePhotoOutput: CaptureOutput {
   /// Corresponds to the `availablePhotoCodecTypes` property of `AVCapturePhotoOutput`
   var availablePhotoCodecTypes: [AVVideoCodecType] { get }
 
+  /// The highest photo quality mode prepared by the capture pipeline.
+  var maxPhotoQualityPrioritization: AVCapturePhotoOutput.QualityPrioritization { get set }
+
   /// Corresponds to the `isHighResolutionCaptureEnabled` property of `AVCapturePhotoOutput`
   var isHighResolutionCaptureEnabled: Bool { get set }
 

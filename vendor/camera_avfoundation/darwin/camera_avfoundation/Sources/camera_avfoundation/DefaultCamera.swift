@@ -225,6 +225,8 @@ final class DefaultCamera: NSObject, Camera {
     videoCaptureSession.addConnection(connection)
 
     videoCaptureSession.addOutput(capturePhotoOutput.avOutput)
+    // Configure before the session starts: changing this while running rebuilds the pipeline.
+    capturePhotoOutput.maxPhotoQualityPrioritization = .speed
 
     motionManager.startAccelerometerUpdates()
 
@@ -802,6 +804,8 @@ final class DefaultCamera: NSObject, Camera {
     if flashMode != .torch {
       settings.flashMode = getAVCaptureFlashMode(for: flashMode)
     }
+
+    settings.photoQualityPrioritization = .speed
 
     if #available(iOS 18.0, *) {
       guard capturePhotoOutput.isShutterSoundSuppressionSupported else {

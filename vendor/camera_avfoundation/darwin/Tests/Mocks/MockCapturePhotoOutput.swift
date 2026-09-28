@@ -11,6 +11,7 @@ import AVFoundation
 final class MockCapturePhotoOutput: NSObject, CapturePhotoOutput {
   var avOutput = AVCapturePhotoOutput()
   var availablePhotoCodecTypes: [AVVideoCodecType] = []
+  var maxPhotoQualityPrioritization: AVCapturePhotoOutput.QualityPrioritization = .balanced
   var isHighResolutionCaptureEnabled = false
   var maxPhotoDimensions = CMVideoDimensions()
   var supportedFlashModes: [AVCaptureDevice.FlashMode] = []
