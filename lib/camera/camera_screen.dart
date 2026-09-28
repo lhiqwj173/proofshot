@@ -51,6 +51,11 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _zoomGestureActive = false;
   double _zoomStartFactor = 1;
   bool _focusBusy = false;
+  bool _recordingActionBusy = false;
+  bool _recordingPhotoBusy = false;
+  final Stopwatch _recordingClock = Stopwatch();
+  Timer? _recordingTicker;
+  Future<void> _mediaOperationTail = Future<void>.value();
   Offset? _focusIndicator;
   int? _focusIndicatorGeneration;
   WatermarkSnapshot? _recordingSnapshot;
@@ -79,6 +84,8 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   void dispose() {
     _isShuttingDown = true;
+    _recordingTicker?.cancel();
+    _recordingClock.stop();
     widget.settings.removeListener(_handleSettingsChanged);
     _cameraCoordinator.removeListener(_handleCameraStateChanged);
     unawaited(
@@ -97,6 +104,11 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() {});
     _syncHardwareCapture();
     final CameraSessionState state = _cameraCoordinator.state;
+    if (state != CameraSessionState.recording) {
+      _recordingClock.stop();
+      _recordingTicker?.cancel();
+      _recordingTicker = null;
+    }
     if (state == CameraSessionState.processing &&
         _cameraCoordinator.pendingInterruptedRecording != null &&
         !_handlingInterruptedRecording) {
@@ -343,6 +355,10 @@ class _CameraScreenState extends State<CameraScreen> {
               'The recording began without a frozen watermark snapshot.',
             ));
         if (mounted) {
+          _recordingClock
+            ..reset()
+            ..start();
+          _startRecordingTicker();
           setState(() => _mediaMessage = null);
         }
       } else {
@@ -356,9 +372,12 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _stopVideoRecording() async {
     if (_cameraCoordinator.state != CameraSessionState.recording ||
-        _mediaBusy) {
+        _mediaBusy ||
+        _recordingActionBusy ||
+        _recordingPhotoBusy) {
       return;
     }
+    setState(() => _recordingActionBusy = true);
     try {
       final WatermarkSnapshot? snapshot = _recordingSnapshot;
       final XFile source = await _cameraCoordinator.stopVideoRecording();
@@ -372,6 +391,65 @@ class _CameraScreenState extends State<CameraScreen> {
       _showMediaError(error);
     } finally {
       await _finishCameraProcessingIfPossible();
+      if (mounted) setState(() => _recordingActionBusy = false);
+    }
+  }
+
+  Future<void> _toggleVideoRecordingPause() async {
+    if (_cameraCoordinator.state != CameraSessionState.recording ||
+        _recordingActionBusy ||
+        _recordingPhotoBusy ||
+        _mediaBusy) {
+      return;
+    }
+    setState(() => _recordingActionBusy = true);
+    try {
+      if (_cameraCoordinator.isRecordingPaused) {
+        await _cameraCoordinator.resumeVideoRecording();
+        _recordingClock.start();
+        _startRecordingTicker();
+      } else {
+        await _cameraCoordinator.pauseVideoRecording();
+        _recordingClock.stop();
+        _recordingTicker?.cancel();
+        _recordingTicker = null;
+      }
+      if (mounted) setState(() {});
+    } on Object catch (error) {
+      _showMediaError(error);
+    } finally {
+      if (mounted) setState(() => _recordingActionBusy = false);
+    }
+  }
+
+  void _startRecordingTicker() {
+    _recordingTicker?.cancel();
+    _recordingTicker = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  Future<void> _capturePhotoDuringRecording() async {
+    if (_cameraCoordinator.state != CameraSessionState.recording ||
+        _cameraCoordinator.isRecordingPaused ||
+        _recordingActionBusy ||
+        _recordingPhotoBusy ||
+        _mediaBusy) {
+      return;
+    }
+    setState(() => _recordingPhotoBusy = true);
+    try {
+      final WatermarkSnapshot snapshot = _snapshotAt(
+        _locationForCapture(),
+        DateTime.now(),
+      );
+      final XFile source = await _cameraCoordinator
+          .takePictureDuringRecording();
+      await _processCapturedMedia(source, snapshot, 'photo');
+    } on Object catch (error) {
+      _showMediaError(error);
+    } finally {
+      if (mounted) setState(() => _recordingPhotoBusy = false);
     }
   }
 
@@ -403,6 +481,22 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _processCapturedMedia(
+    XFile source,
+    WatermarkSnapshot snapshot,
+    String kind,
+  ) async {
+    final Future<void> previous = _mediaOperationTail;
+    final Completer<void> completion = Completer<void>();
+    _mediaOperationTail = completion.future;
+    try {
+      await previous;
+      await _processCapturedMediaSerial(source, snapshot, kind);
+    } finally {
+      completion.complete();
+    }
+  }
+
+  Future<void> _processCapturedMediaSerial(
     XFile source,
     WatermarkSnapshot snapshot,
     String kind,
@@ -923,6 +1017,126 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
+  Widget _buildRecordingTimer() {
+    final int elapsedSeconds = _recordingClock.elapsed.inSeconds;
+    final String duration = <int>[
+      elapsedSeconds ~/ 3600,
+      (elapsedSeconds ~/ 60) % 60,
+      elapsedSeconds % 60,
+    ].map((int value) => value.toString().padLeft(2, '0')).join(':');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: BoxDecoration(
+        color: _recordingColor,
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Text(
+        duration,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 25,
+          fontWeight: FontWeight.w500,
+          fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecordingControl({
+    required String tooltip,
+    required double size,
+    required Widget child,
+    required VoidCallback? onTap,
+  }) {
+    return Semantics(
+      button: true,
+      enabled: onTap != null,
+      label: tooltip,
+      child: Tooltip(
+        message: tooltip,
+        child: SizedBox.square(
+          dimension: size,
+          child: Material(
+            color: AppPalette.surface.withValues(alpha: 0.92),
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: onTap,
+              child: Center(child: child),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecordingControls() {
+    final bool paused = _cameraCoordinator.isRecordingPaused;
+    final bool canAct =
+        !_recordingActionBusy && !_recordingPhotoBusy && !_mediaBusy;
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _buildRecordingControl(
+              tooltip: paused ? '继续录像' : '暂停录像',
+              size: 64,
+              onTap: canAct
+                  ? () => unawaited(_toggleVideoRecordingPause())
+                  : null,
+              child: Icon(
+                paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                color: Colors.white,
+                size: 33,
+              ),
+            ),
+          ),
+        ),
+        _buildRecordingControl(
+          tooltip: '停止录像',
+          size: 82,
+          onTap: canAct ? () => unawaited(_stopVideoRecording()) : null,
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: _recordingColor,
+              borderRadius: BorderRadius.circular(7),
+            ),
+          ),
+        ),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: _buildRecordingControl(
+              tooltip: '录像时拍照',
+              size: 64,
+              onTap: canAct && !paused
+                  ? () => unawaited(_capturePhotoDuringRecording())
+                  : null,
+              child: _recordingPhotoBusy
+                  ? const SizedBox.square(
+                      dimension: 25,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                      child: SizedBox.square(dimension: 48),
+                    ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildMediaMessage(String mediaMessage) {
     final ButtonStyle actionStyle = TextButton.styleFrom(
       foregroundColor: _accentColor,
@@ -950,7 +1164,9 @@ class _CameraScreenState extends State<CameraScreen> {
           ))
             TextButton.icon(
               style: actionStyle,
-              onPressed: _mediaBusy
+              onPressed:
+                  _mediaBusy ||
+                      _cameraCoordinator.state == CameraSessionState.recording
                   ? null
                   : () => unawaited(_restorePendingMedia()),
               icon: const Icon(Icons.restore),
@@ -1177,6 +1393,7 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Widget _buildControlPanel(CameraSessionState cameraState) {
+    final bool recording = cameraState == CameraSessionState.recording;
     final bool canChangeMode = cameraState == CameraSessionState.ready;
     final List<CameraZoomStep> steps = _cameraCoordinator.zoomSteps;
     return Padding(
@@ -1200,25 +1417,30 @@ class _CameraScreenState extends State<CameraScreen> {
           else
             const SizedBox(height: 70),
           const SizedBox(height: 10),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: _buildGalleryControl(cameraState),
+          if (recording)
+            _buildRecordingControls()
+          else
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: _buildGalleryControl(cameraState),
+                  ),
                 ),
-              ),
-              _buildCaptureButton(cameraState),
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: _buildCameraSwitchControl(canChangeMode),
+                _buildCaptureButton(cameraState),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: _buildCameraSwitchControl(canChangeMode),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 36),
-          _buildCaptureModeControl(canChangeMode),
+              ],
+            ),
+          if (!recording) ...<Widget>[
+            const SizedBox(height: 36),
+            _buildCaptureModeControl(canChangeMode),
+          ],
         ],
       ),
     );
@@ -1310,12 +1532,20 @@ class _CameraScreenState extends State<CameraScreen> {
                     child: _buildWatermarkPreview(cameraState),
                   ),
                 ),
-              Positioned(
-                top: safePadding.top + 18,
-                left: 20,
-                right: 20,
-                child: _buildTopBar(cameraState),
-              ),
+              if (cameraState == CameraSessionState.recording)
+                Positioned(
+                  top: frameTop + 18,
+                  left: 0,
+                  right: 0,
+                  child: Center(child: _buildRecordingTimer()),
+                )
+              else
+                Positioned(
+                  top: safePadding.top + 18,
+                  left: 20,
+                  right: 20,
+                  child: _buildTopBar(cameraState),
+                ),
               Positioned(
                 top: safePadding.top + 92,
                 left: 16,

@@ -67,6 +67,7 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   CameraSessionState get state => _state;
   int get generation => _generation;
   CameraCaptureMode get captureMode => _captureMode;
+  bool get isRecordingPaused => _controller?.value.isRecordingPaused == true;
   FlashMode get flashMode => _flashMode;
   FocusMode get focusMode => _focusMode;
   Offset? get focusPoint => _focusPoint;
@@ -394,6 +395,38 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
         throw StateError('A video can only stop while recording.');
       }
       return _stopRecordingInternal(interrupted: interrupted);
+    });
+  }
+
+  Future<void> pauseVideoRecording() {
+    _ensureOpen();
+    return _run<void>(() async {
+      if (_state != CameraSessionState.recording || isRecordingPaused) {
+        throw StateError('Only an active recording can be paused.');
+      }
+      await _requireController().pauseVideoRecording();
+      notifyListeners();
+    });
+  }
+
+  Future<void> resumeVideoRecording() {
+    _ensureOpen();
+    return _run<void>(() async {
+      if (_state != CameraSessionState.recording || !isRecordingPaused) {
+        throw StateError('Only a paused recording can be resumed.');
+      }
+      await _requireController().resumeVideoRecording();
+      notifyListeners();
+    });
+  }
+
+  Future<XFile> takePictureDuringRecording() {
+    _ensureOpen();
+    return _run<XFile>(() async {
+      if (_state != CameraSessionState.recording || isRecordingPaused) {
+        throw StateError('A recording photo requires an active recording.');
+      }
+      return _requireController().takePicture();
     });
   }
 

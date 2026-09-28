@@ -154,6 +154,40 @@ void main() {
     }
   });
 
+  test('录像可暂停、继续，并在录制中拍照', () async {
+    final CameraPlatform original = CameraPlatform.instance;
+    final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
+    CameraPlatform.instance = platform;
+    final CameraCoordinator coordinator = CameraCoordinator();
+    try {
+      await coordinator.initialize();
+      await coordinator.setCaptureMode(CameraCaptureMode.video);
+      expect(await coordinator.startVideoRecording(), isTrue);
+
+      await coordinator.pauseVideoRecording();
+      expect(coordinator.isRecordingPaused, isTrue);
+      await expectLater(
+        coordinator.takePictureDuringRecording(),
+        throwsStateError,
+      );
+
+      await coordinator.resumeVideoRecording();
+      expect(coordinator.isRecordingPaused, isFalse);
+      expect(
+        (await coordinator.takePictureDuringRecording()).path,
+        'video_photo.jpg',
+      );
+      expect(coordinator.state, CameraSessionState.recording);
+      expect(platform.photoCount, 1);
+
+      await coordinator.stopVideoRecording();
+      await coordinator.finishProcessing();
+    } finally {
+      await coordinator.shutdown();
+      CameraPlatform.instance = original;
+    }
+  });
+
   test('点按取景区自动切换手动对焦，并可切回持续自动对焦', () async {
     final CameraPlatform original = CameraPlatform.instance;
     final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
@@ -248,6 +282,7 @@ class _ZoomCameraPlatform extends CameraPlatform {
   double? lastZoomLevel;
   FocusMode? lastFocusMode;
   Point<double>? lastFocusPoint;
+  int photoCount = 0;
 
   @override
   Future<List<CameraDescription>> availableCameras() async =>
@@ -323,6 +358,18 @@ class _ZoomCameraPlatform extends CameraPlatform {
 
   @override
   Future<void> startVideoCapturing(VideoCaptureOptions options) async {}
+
+  @override
+  Future<void> pauseVideoRecording(int cameraId) async {}
+
+  @override
+  Future<void> resumeVideoRecording(int cameraId) async {}
+
+  @override
+  Future<XFile> takePicture(int cameraId) async {
+    photoCount++;
+    return XFile('video_photo.jpg');
+  }
 
   @override
   Future<XFile> stopVideoRecording(int cameraId) async =>
