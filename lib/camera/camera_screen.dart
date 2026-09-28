@@ -531,6 +531,9 @@ class _CameraScreenState extends State<CameraScreen> {
         renderedPath: renderedPath,
       );
       await _galleryBridge.saveToPhotos(taskId: taskId);
+      if (kind == 'photo') {
+        await HapticFeedback.lightImpact();
+      }
       if (mounted) {
         unawaited(_refreshPendingMedia());
       }
