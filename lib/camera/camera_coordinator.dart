@@ -88,7 +88,7 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Set<FlashMode> get supportedFlashModes =>
-      _supportedFlashModesFor(_captureMode, _selectedCamera);
+      _supportedFlashModesFor(_selectedCamera);
   CameraException? get lastCameraException => _lastCameraException;
   XFile? get pendingInterruptedRecording => _pendingInterruptedRecording;
   bool get isBackCameraSelected =>
@@ -160,10 +160,7 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
 
-      if (!_supportedFlashModesFor(
-        mode,
-        _selectedCamera,
-      ).contains(_flashMode)) {
+      if (!_supportedFlashModesFor(_selectedCamera).contains(_flashMode)) {
         final CameraController controller = _requireController();
         try {
           await controller.setFlashMode(FlashMode.off);
@@ -551,10 +548,7 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
         await candidate.dispose();
         return false;
       }
-      final Set<FlashMode> allowedModes = _supportedFlashModesFor(
-        _captureMode,
-        camera,
-      );
+      final Set<FlashMode> allowedModes = _supportedFlashModesFor(camera);
       final FlashMode modeToApply = allowedModes.contains(flashToRestore)
           ? flashToRestore
           : FlashMode.off;
@@ -802,23 +796,11 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
     return false;
   }
 
-  Set<FlashMode> _supportedFlashModesFor(
-    CameraCaptureMode mode,
-    CameraDescription? camera,
-  ) {
+  Set<FlashMode> _supportedFlashModesFor(CameraDescription? camera) {
     if (!_supportsFlash(camera)) {
       return const <FlashMode>{FlashMode.off};
     }
-    return switch (mode) {
-      CameraCaptureMode.photo => const <FlashMode>{
-        FlashMode.off,
-        FlashMode.always,
-      },
-      CameraCaptureMode.video => const <FlashMode>{
-        FlashMode.off,
-        FlashMode.torch,
-      },
-    };
+    return const <FlashMode>{FlashMode.off, FlashMode.torch};
   }
 
   bool _isCurrentGeneration(int generation) =>

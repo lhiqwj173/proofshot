@@ -762,16 +762,12 @@ class _CameraScreenState extends State<CameraScreen> {
     final bool enabled = controlsEnabled && unavailableReason == null;
     final FlashMode mode = _cameraCoordinator.flashMode;
     final bool isOn = mode != FlashMode.off;
-    final FlashMode enabledMode =
-        _cameraCoordinator.captureMode == CameraCaptureMode.video
-        ? FlashMode.torch
-        : FlashMode.always;
     return IconButton(
       tooltip: unavailableReason ?? (isOn ? '关闭闪光灯' : '开启闪光灯'),
       onPressed: enabled
           ? () => unawaited(
               _cameraCoordinator.setFlashMode(
-                isOn ? FlashMode.off : enabledMode,
+                isOn ? FlashMode.off : FlashMode.torch,
               ),
             )
           : null,
