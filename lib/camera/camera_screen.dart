@@ -15,6 +15,7 @@ import '../settings/watermark_settings.dart';
 import '../watermark/live_watermark_preview.dart';
 import '../watermark/watermark_snapshot.dart';
 import 'camera_coordinator.dart';
+import 'capture_haptics.dart';
 import 'hardware_capture_bridge.dart';
 import 'zoom_control.dart';
 
@@ -38,6 +39,7 @@ class _CameraScreenState extends State<CameraScreen> {
   late final WatermarkBridge _watermarkBridge;
   late final WatermarkGalleryBridge _galleryBridge;
   late final HardwareCaptureBridge _hardwareCaptureBridge;
+  late final CaptureHaptics _captureHaptics;
   String? _locationText;
   LocationUnavailableException? _locationFailure;
   bool _locationLoading = false;
@@ -74,6 +76,7 @@ class _CameraScreenState extends State<CameraScreen> {
     _locationText = widget.settings.activeLocation;
     _watermarkBridge = WatermarkBridge();
     _galleryBridge = WatermarkGalleryBridge();
+    _captureHaptics = const CaptureHaptics();
     _hardwareCaptureBridge = HardwareCaptureBridge(_capturePhoto);
     widget.settings.addListener(_handleSettingsChanged);
     unawaited(_cameraCoordinator.initialize());
@@ -532,7 +535,7 @@ class _CameraScreenState extends State<CameraScreen> {
       );
       await _galleryBridge.saveToPhotos(taskId: taskId);
       if (kind == 'photo') {
-        await HapticFeedback.lightImpact();
+        await _captureHaptics.lightImpact();
       }
       if (mounted) {
         unawaited(_refreshPendingMedia());

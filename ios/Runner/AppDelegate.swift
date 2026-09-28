@@ -10,6 +10,7 @@ import UIKit
   private var watermarkGalleryBridge: WatermarkGalleryBridge?
   private var hardwareCaptureBridge: HardwareCaptureBridge?
   private var locationPickerBridge: WatermarkLocationPickerBridge?
+  private var captureHaptics: CaptureHaptics?
 
   override func application(
     _ application: UIApplication,
@@ -32,6 +33,29 @@ import UIKit
     locationPickerBridge = WatermarkLocationPickerBridge(
       messenger: engineBridge.applicationRegistrar.messenger()
     )
+    captureHaptics = CaptureHaptics(
+      messenger: engineBridge.applicationRegistrar.messenger()
+    )
+  }
+}
+
+private final class CaptureHaptics {
+  private let channel: FlutterMethodChannel
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "proofshot/capture_haptics", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "lightImpact", call.arguments == nil else {
+        result(FlutterError(code: "invalid_capture_haptics_request", message: "拍照震动请求无效。", details: nil))
+        return
+      }
+      DispatchQueue.main.async {
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.prepare()
+        generator.impactOccurred()
+        result(nil)
+      }
+    }
   }
 }
 
