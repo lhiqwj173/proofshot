@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import AudioToolbox
 import Contacts
 import CoreHaptics
 import Flutter
@@ -128,8 +129,9 @@ private final class RuntimeLogBridge {
 }
 
 private final class CaptureHaptics {
+  // 系统相机快门同款触感：走 AudioToolbox，不受 AVAudioSession 与采集会话抢占影响。
+  private static let shutterHapticSound: SystemSoundID = 1519
   private let channel: FlutterMethodChannel
-  private let generator = UIImpactFeedbackGenerator(style: .medium)
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(name: "proofshot/capture_haptics", binaryMessenger: messenger)
@@ -147,18 +149,13 @@ private final class CaptureHaptics {
           result(FlutterError(code: "haptics_unsupported", message: "当前设备不支持触觉反馈。", details: nil))
           return
         }
-        do {
-          try AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
-          self.generator.impactOccurred()
-          self.generator.prepare()
-          result(["audio_category": AVAudioSession.sharedInstance().category.rawValue])
-        } catch {
-          result(FlutterError(
-            code: "haptics_audio_session_failed",
-            message: "无法启用拍照震动：\(error.localizedDescription)",
-            details: nil
-          ))
-        }
+        try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
+        AudioServicesPlaySystemSound(Self.shutterHapticSound)
+        result([
+          "route": "system_sound",
+          "sound_id": Int(Self.shutterHapticSound),
+          "audio_category": AVAudioSession.sharedInstance().category.rawValue,
+        ] as [String: Any])
       }
     }
   }

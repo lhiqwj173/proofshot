@@ -10,15 +10,19 @@ class CaptureHaptics {
   const CaptureHaptics();
 
   Future<void> captureImpact() async {
-    final details = await _channel.invokeMapMethod<String, String>(
-      'captureImpact',
-    );
-    if (details == null || details['audio_category'] == null) {
-      throw StateError('The haptics bridge returned no audio session state.');
+    final Map<String, Object?>? details = await _channel
+        .invokeMapMethod<String, Object?>('captureImpact');
+    final Object? route = details?['route'];
+    if (route is! String) {
+      throw StateError('The haptics bridge returned no feedback route.');
     }
     await RuntimeLogs.instance.event(
       'haptics.native',
-      context: <String, Object?>{'audio_category': details['audio_category']},
+      context: <String, Object?>{
+        'route': route,
+        'sound_id': details?['sound_id'],
+        'audio_category': details?['audio_category'],
+      },
     );
   }
 }

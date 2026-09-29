@@ -343,16 +343,17 @@ class _CameraScreenState extends State<CameraScreen> {
     try {
       final String location = _locationForCapture();
       final WatermarkSnapshot snapshot = _snapshotAt(location, DateTime.now());
+      final Future<void> haptics = RuntimeLogs.instance.trace(
+        'haptics.impact',
+        _captureHaptics.captureImpact,
+      );
       final XFile source = await RuntimeLogs.instance.trace(
         'camera.take_photo',
         _cameraCoordinator.takePicture,
         context: const <String, Object?>{'during_recording': false},
       );
       await Future.wait<void>(<Future<void>>[
-        RuntimeLogs.instance.trace(
-          'haptics.impact',
-          _captureHaptics.captureImpact,
-        ),
+        haptics,
         _processCapturedMedia(source, snapshot, 'photo'),
       ]);
     } on Object catch (error, stack) {
@@ -481,16 +482,17 @@ class _CameraScreenState extends State<CameraScreen> {
         _locationForCapture(),
         DateTime.now(),
       );
+      final Future<void> haptics = RuntimeLogs.instance.trace(
+        'haptics.impact',
+        _captureHaptics.captureImpact,
+      );
       final XFile source = await RuntimeLogs.instance.trace(
         'camera.take_photo_during_recording',
         _cameraCoordinator.takePictureDuringRecording,
         context: const <String, Object?>{'during_recording': true},
       );
       await Future.wait<void>(<Future<void>>[
-        RuntimeLogs.instance.trace(
-          'haptics.impact',
-          _captureHaptics.captureImpact,
-        ),
+        haptics,
         _processCapturedMedia(source, snapshot, 'photo'),
       ]);
     } on Object catch (error, stack) {
