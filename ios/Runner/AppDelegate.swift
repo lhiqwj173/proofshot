@@ -1,6 +1,7 @@
 import AVFoundation
 import AVKit
 import Contacts
+import CoreHaptics
 import Flutter
 import MapKit
 import UIKit
@@ -12,6 +13,7 @@ import UIKit
   private var hardwareCaptureBridge: HardwareCaptureBridge?
   private var locationPickerBridge: WatermarkLocationPickerBridge?
   private var captureHaptics: CaptureHaptics?
+  private var runtimeLogBridge: RuntimeLogBridge?
 
   override func application(
     _ application: UIApplication,
@@ -37,25 +39,126 @@ import UIKit
     captureHaptics = CaptureHaptics(
       messenger: engineBridge.applicationRegistrar.messenger()
     )
+    runtimeLogBridge = RuntimeLogBridge(
+      messenger: engineBridge.applicationRegistrar.messenger()
+    )
+  }
+}
+
+private final class RuntimeLogBridge {
+  private let channel: FlutterMethodChannel
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "proofshot/runtime_logs", binaryMessenger: messenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      DispatchQueue.main.async {
+        switch call.method {
+        case "paths":
+          do {
+            let support = try FileManager.default.url(
+              for: .applicationSupportDirectory, in: .userDomainMask,
+              appropriateFor: nil, create: true
+            )
+            let documents = try FileManager.default.url(
+              for: .documentDirectory, in: .userDomainMask,
+              appropriateFor: nil, create: true
+            )
+            result(["support": support.path, "documents": documents.path])
+          } catch {
+            result(FlutterError(code: "log_paths_failed", message: error.localizedDescription, details: nil))
+          }
+        case "shareFiles":
+          guard let self else {
+            result(FlutterError(code: "log_share_unavailable", message: "日志服务不可用。", details: nil))
+            return
+          }
+          self.shareFiles(call: call, result: result)
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
+  }
+
+  private func shareFiles(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard let arguments = call.arguments as? [String: Any],
+          let paths = arguments["paths"] as? [String],
+          !paths.isEmpty,
+          let documents = FileManager.default.urls(
+            for: .documentDirectory, in: .userDomainMask
+          ).first else {
+      result(FlutterError(code: "log_share_invalid", message: "日志分享参数无效。", details: nil))
+      return
+    }
+    let allowedDirectory = documents.appendingPathComponent("runtime_logs_export", isDirectory: true)
+      .standardizedFileURL
+    var urls: [URL] = []
+    for path in paths {
+      let url = URL(fileURLWithPath: path).standardizedFileURL
+      guard url.deletingLastPathComponent() == allowedDirectory,
+            ["runtime.jsonl", "runtime.1.jsonl"].contains(url.lastPathComponent),
+            FileManager.default.fileExists(atPath: url.path) else {
+        result(FlutterError(code: "log_share_file_invalid", message: "日志文件不存在或路径无效。", details: nil))
+        return
+      }
+      urls.append(url)
+    }
+    guard let scene = UIApplication.shared.connectedScenes
+      .compactMap({ $0 as? UIWindowScene })
+      .first(where: { $0.activationState == .foregroundActive }),
+      let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController else {
+      result(FlutterError(code: "log_share_unavailable", message: "当前没有可用的分享窗口。", details: nil))
+      return
+    }
+    var presenter = root
+    while let presented = presenter.presentedViewController {
+      presenter = presented
+    }
+    let activity = UIActivityViewController(activityItems: urls, applicationActivities: nil)
+    if let popover = activity.popoverPresentationController {
+      popover.sourceView = presenter.view
+      popover.sourceRect = CGRect(x: presenter.view.bounds.midX,
+                                  y: presenter.view.bounds.midY, width: 0, height: 0)
+      popover.permittedArrowDirections = []
+    }
+    presenter.present(activity, animated: true) {
+      result(nil)
+    }
   }
 }
 
 private final class CaptureHaptics {
   private let channel: FlutterMethodChannel
+  private let generator = UIImpactFeedbackGenerator(style: .medium)
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(name: "proofshot/capture_haptics", binaryMessenger: messenger)
-    channel.setMethodCallHandler { call, result in
-      guard call.method == "lightImpact", call.arguments == nil else {
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterError(code: "haptics_unavailable", message: "拍照震动服务不可用。", details: nil))
+        return
+      }
+      guard call.method == "captureImpact", call.arguments == nil else {
         result(FlutterError(code: "invalid_capture_haptics_request", message: "拍照震动请求无效。", details: nil))
         return
       }
       DispatchQueue.main.async {
-        try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.prepare()
-        generator.impactOccurred()
-        result(nil)
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else {
+          result(FlutterError(code: "haptics_unsupported", message: "当前设备不支持触觉反馈。", details: nil))
+          return
+        }
+        do {
+          try AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
+          self.generator.impactOccurred()
+          self.generator.prepare()
+          result(["audio_category": AVAudioSession.sharedInstance().category.rawValue])
+        } catch {
+          result(FlutterError(
+            code: "haptics_audio_session_failed",
+            message: "无法启用拍照震动：\(error.localizedDescription)",
+            details: nil
+          ))
+        }
       }
     }
   }

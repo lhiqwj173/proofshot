@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../design/app_palette.dart';
+import '../diagnostics/runtime_logs.dart';
 import '../location/location_service.dart';
 import '../location/location_map_picker.dart';
 import '../media/watermark_bridge.dart';
@@ -65,6 +66,7 @@ class _CameraScreenState extends State<CameraScreen> {
   RecentCaptureThumbnail? _recentThumbnail;
   Uint8List? _recentThumbnailBytes;
   String? _mediaMessage;
+  CameraSessionState? _lastLoggedCameraState;
 
   @override
   void initState() {
@@ -79,7 +81,12 @@ class _CameraScreenState extends State<CameraScreen> {
     _captureHaptics = const CaptureHaptics();
     _hardwareCaptureBridge = HardwareCaptureBridge(_capturePhoto);
     widget.settings.addListener(_handleSettingsChanged);
-    unawaited(_cameraCoordinator.initialize());
+    unawaited(
+      RuntimeLogs.instance.trace(
+        'camera.initialize',
+        _cameraCoordinator.initialize,
+      ),
+    );
     unawaited(_refreshPendingMedia());
     unawaited(_loadRecentThumbnail());
   }
@@ -107,6 +114,15 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() {});
     _syncHardwareCapture();
     final CameraSessionState state = _cameraCoordinator.state;
+    if (state != _lastLoggedCameraState) {
+      _lastLoggedCameraState = state;
+      RuntimeLogs.instance.observe(
+        RuntimeLogs.instance.event(
+          'camera.state',
+          context: <String, Object?>{'state': state.name},
+        ),
+      );
+    }
     if (state != CameraSessionState.recording) {
       _recordingClock.stop();
       _recordingTicker?.cancel();
@@ -327,9 +343,22 @@ class _CameraScreenState extends State<CameraScreen> {
     try {
       final String location = _locationForCapture();
       final WatermarkSnapshot snapshot = _snapshotAt(location, DateTime.now());
-      final XFile source = await _cameraCoordinator.takePicture();
-      await _processCapturedMedia(source, snapshot, 'photo');
-    } on Object catch (error) {
+      final XFile source = await RuntimeLogs.instance.trace(
+        'camera.take_photo',
+        _cameraCoordinator.takePicture,
+        context: const <String, Object?>{'during_recording': false},
+      );
+      await Future.wait<void>(<Future<void>>[
+        RuntimeLogs.instance.trace(
+          'haptics.impact',
+          _captureHaptics.captureImpact,
+        ),
+        _processCapturedMedia(source, snapshot, 'photo'),
+      ]);
+    } on Object catch (error, stack) {
+      RuntimeLogs.instance.observe(
+        RuntimeLogs.instance.failure('camera.photo', error, stack),
+      );
       _showMediaError(error);
     } finally {
       await _finishCameraProcessingIfPossible();
@@ -345,11 +374,14 @@ class _CameraScreenState extends State<CameraScreen> {
     try {
       final String location = _locationForCapture();
       WatermarkSnapshot? snapshot;
-      final bool started = await _cameraCoordinator.startVideoRecording(
-        onRecordingStarting: () {
-          snapshot = _snapshotAt(location, DateTime.now());
-          _recordingSnapshot = snapshot;
-        },
+      final bool started = await RuntimeLogs.instance.trace(
+        'camera.start_recording',
+        () => _cameraCoordinator.startVideoRecording(
+          onRecordingStarting: () {
+            snapshot = _snapshotAt(location, DateTime.now());
+            _recordingSnapshot = snapshot;
+          },
+        ),
       );
       if (started) {
         _recordingSnapshot =
@@ -383,7 +415,10 @@ class _CameraScreenState extends State<CameraScreen> {
     setState(() => _recordingActionBusy = true);
     try {
       final WatermarkSnapshot? snapshot = _recordingSnapshot;
-      final XFile source = await _cameraCoordinator.stopVideoRecording();
+      final XFile source = await RuntimeLogs.instance.trace(
+        'camera.stop_recording',
+        _cameraCoordinator.stopVideoRecording,
+      );
       _recordingSnapshot = null;
       if (snapshot == null) {
         throw StateError('The recording has no frozen watermark snapshot.');
@@ -446,10 +481,22 @@ class _CameraScreenState extends State<CameraScreen> {
         _locationForCapture(),
         DateTime.now(),
       );
-      final XFile source = await _cameraCoordinator
-          .takePictureDuringRecording();
-      await _processCapturedMedia(source, snapshot, 'photo');
-    } on Object catch (error) {
+      final XFile source = await RuntimeLogs.instance.trace(
+        'camera.take_photo_during_recording',
+        _cameraCoordinator.takePictureDuringRecording,
+        context: const <String, Object?>{'during_recording': true},
+      );
+      await Future.wait<void>(<Future<void>>[
+        RuntimeLogs.instance.trace(
+          'haptics.impact',
+          _captureHaptics.captureImpact,
+        ),
+        _processCapturedMedia(source, snapshot, 'photo'),
+      ]);
+    } on Object catch (error, stack) {
+      RuntimeLogs.instance.observe(
+        RuntimeLogs.instance.failure('camera.recording_photo', error, stack),
+      );
       _showMediaError(error);
     } finally {
       if (mounted) setState(() => _recordingPhotoBusy = false);
@@ -514,33 +561,64 @@ class _CameraScreenState extends State<CameraScreen> {
       _syncHardwareCapture();
     }
     try {
-      final String taskId = await _galleryBridge.prepareMedia(
-        sourcePath: source.path,
-        kind: kind,
-        snapshot: snapshot,
+      await RuntimeLogs.instance.event(
+        'media.process',
+        phase: 'start',
+        context: <String, Object?>{'kind': kind},
       );
-      final String renderedPath = kind == 'photo'
-          ? await _watermarkBridge.renderPhoto(
-              sourcePath: source.path,
-              snapshot: snapshot,
-            )
-          : await _watermarkBridge.renderVideo(
-              sourcePath: source.path,
-              snapshot: snapshot,
-            );
+      final String taskId = await RuntimeLogs.instance.trace(
+        'media.prepare',
+        () => _galleryBridge.prepareMedia(
+          sourcePath: source.path,
+          kind: kind,
+          snapshot: snapshot,
+        ),
+        context: <String, Object?>{'kind': kind},
+      );
+      final String renderedPath = await RuntimeLogs.instance.trace(
+        'media.render',
+        () => kind == 'photo'
+            ? _watermarkBridge.renderPhoto(
+                sourcePath: source.path,
+                snapshot: snapshot,
+              )
+            : _watermarkBridge.renderVideo(
+                sourcePath: source.path,
+                snapshot: snapshot,
+              ),
+        context: <String, Object?>{'kind': kind},
+      );
       await _updateRecentThumbnail(renderedPath, kind);
-      await _galleryBridge.markRendered(
-        taskId: taskId,
-        renderedPath: renderedPath,
+      await RuntimeLogs.instance.trace(
+        'media.mark_rendered',
+        () => _galleryBridge.markRendered(
+          taskId: taskId,
+          renderedPath: renderedPath,
+        ),
+        context: <String, Object?>{'kind': kind},
       );
-      await _galleryBridge.saveToPhotos(taskId: taskId);
-      if (kind == 'photo') {
-        await _captureHaptics.lightImpact();
-      }
+      await RuntimeLogs.instance.trace(
+        'media.save_to_photos',
+        () => _galleryBridge.saveToPhotos(taskId: taskId),
+        context: <String, Object?>{'kind': kind},
+      );
+      await RuntimeLogs.instance.event(
+        'media.process',
+        phase: 'success',
+        context: <String, Object?>{'kind': kind},
+      );
       if (mounted) {
         unawaited(_refreshPendingMedia());
       }
-    } on Object catch (error) {
+    } on Object catch (error, stack) {
+      RuntimeLogs.instance.observe(
+        RuntimeLogs.instance.failure(
+          'media.process',
+          error,
+          stack,
+          context: <String, Object?>{'kind': kind},
+        ),
+      );
       _showMediaError(error);
       unawaited(_refreshPendingMedia());
     } finally {
@@ -809,7 +887,11 @@ class _CameraScreenState extends State<CameraScreen> {
     final String details = error is PlatformException
         ? '${error.code}: ${error.message ?? error.details ?? '未知原生错误'}'
         : error.toString();
-    setState(() => _mediaMessage = '媒体处理失败：$details');
+    final String subject =
+        error is PlatformException && error.code.startsWith('haptics_')
+        ? '拍照震动失败'
+        : '媒体处理失败';
+    setState(() => _mediaMessage = '$subject：$details');
   }
 
   void _showMediaMessage(String message) {

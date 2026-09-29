@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'camera/camera_screen.dart';
+import 'diagnostics/runtime_logs.dart';
 import 'design/app_palette.dart';
 import 'settings/watermark_settings.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await RuntimeLogs.instance.initialize();
+  RuntimeLogs.instance.installGlobalErrorHandlers();
   SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
   runApp(const ProofshotApp());
 }
@@ -18,13 +21,31 @@ class ProofshotApp extends StatefulWidget {
   State<ProofshotApp> createState() => _ProofshotAppState();
 }
 
-class _ProofshotAppState extends State<ProofshotApp> {
+class _ProofshotAppState extends State<ProofshotApp>
+    with WidgetsBindingObserver {
   late Future<WatermarkSettings> _settingsLoad;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _settingsLoad = WatermarkSettings.load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    RuntimeLogs.instance.observe(
+      RuntimeLogs.instance.event(
+        'app.lifecycle',
+        context: <String, Object?>{'state': state.name},
+      ),
+    );
   }
 
   void _retrySettingsLoad() {

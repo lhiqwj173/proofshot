@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../design/app_palette.dart';
+import '../diagnostics/runtime_log_dialog.dart';
 
 /// Persisted, user-editable watermark fields.
 class WatermarkSettings extends ChangeNotifier {
@@ -288,6 +289,17 @@ class _WatermarkSettingsPageState extends State<WatermarkSettingsPage> {
                     style: TextStyle(
                       color: AppPalette.secondaryText,
                       fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 36),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.description_outlined),
+                    title: const Text('运行日志'),
+                    subtitle: const Text('导出拍摄诊断日志并通过系统面板分享'),
+                    onTap: () => showDialog<void>(
+                      context: context,
+                      builder: (_) => const RuntimeLogDialog(),
                     ),
                   ),
                 ],
