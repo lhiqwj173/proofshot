@@ -785,6 +785,8 @@ final class WatermarkGalleryBridge {
       let navigationController = UINavigationController(rootViewController: gallery)
       navigationController.overrideUserInterfaceStyle = .dark
       navigationController.modalPresentationStyle = .fullScreen
+      // 在展示前准备最新作品，避免先闪现图库网格。
+      gallery.loadViewIfNeeded()
       presenter.present(navigationController, animated: true)
     }
   }
@@ -992,6 +994,7 @@ private final class WatermarkGalleryViewController: UIViewController,
   private var isSelecting = false
   private var selectedIdentifiers = Set<String>()
   private var isDeleting = false
+  private var needsInitialPreview = true
 
   init(journal: WatermarkMediaJournal, onClose: @escaping () -> Void) {
     self.journal = journal
@@ -1182,14 +1185,21 @@ private final class WatermarkGalleryViewController: UIViewController,
       updateSelectionActions()
       return
     }
+    showPreview(entries: filteredEntries, initialIndex: indexPath.item, animated: true)
+  }
+
+  private func showPreview(entries: [WatermarkGalleryEntry], initialIndex: Int, animated: Bool) {
+    guard let navigationController else {
+      preconditionFailure("The gallery must belong to a navigation controller.")
+    }
     let detail = WatermarkMediaPagerViewController(
       journal: journal,
-      entries: filteredEntries,
-      initialIndex: indexPath.item
+      entries: entries,
+      initialIndex: initialIndex
     ) { [weak self] in
       self?.reloadFromIndex()
     }
-    navigationController?.pushViewController(detail, animated: true)
+    navigationController.pushViewController(detail, animated: animated)
   }
 
   func collectionView(
@@ -1421,6 +1431,12 @@ private final class WatermarkGalleryViewController: UIViewController,
       collectionView.isHidden = false
       applyFilter()
       if !isSelecting { updateNavigationActions() }
+      if needsInitialPreview {
+        needsInitialPreview = false
+        if !entries.isEmpty {
+          showPreview(entries: entries, initialIndex: 0, animated: false)
+        }
+      }
     } catch {
       collectionView.isHidden = true
       statusLabel.text = "图库读取失败：\(error.localizedDescription)"
@@ -1462,7 +1478,8 @@ private final class WatermarkMediaPagerViewController: UIViewController,
   UIPageViewControllerDataSource,
   UIPageViewControllerDelegate,
   UICollectionViewDataSource,
-  UICollectionViewDelegateFlowLayout
+  UICollectionViewDelegateFlowLayout,
+  UIGestureRecognizerDelegate
 {
   private let journal: WatermarkMediaJournal
   private let onChange: () -> Void
@@ -1480,6 +1497,9 @@ private final class WatermarkMediaPagerViewController: UIViewController,
   private var controlsHidden = false
   private var pageTransitionInProgress = false
   private var sharing = false
+  private var needsFilmstripCentering = true
+  private lazy var dismissGesture = UIPanGestureRecognizer(
+    target: self, action: #selector(handleDismissPan(_:)))
 
   init(
     journal: WatermarkMediaJournal,
@@ -1493,7 +1513,7 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     self.currentIndex = initialIndex
     let layout = UICollectionViewFlowLayout()
     layout.scrollDirection = .horizontal
-    layout.minimumLineSpacing = 4
+    layout.minimumLineSpacing = 3
     filmstrip = UICollectionView(frame: .zero, collectionViewLayout: layout)
     self.onChange = onChange
     pageController = UIPageViewController(
@@ -1524,6 +1544,12 @@ private final class WatermarkMediaPagerViewController: UIViewController,
       pageController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
     pageController.didMove(toParent: self)
+    dismissGesture.maximumNumberOfTouches = 1
+    dismissGesture.delegate = self
+    pageController.view.addGestureRecognizer(dismissGesture)
+    for case let pagingScrollView as UIScrollView in pageController.view.subviews {
+      pagingScrollView.panGestureRecognizer.require(toFail: dismissGesture)
+    }
     pageController.setViewControllers(
       [makeDetailPage(at: currentIndex)],
       direction: .forward,
@@ -1546,6 +1572,22 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     }
   }
 
+  override func viewDidLayoutSubviews() {
+    super.viewDidLayoutSubviews()
+    guard !entries.isEmpty, filmstrip.bounds.width > 0,
+          let layout = filmstrip.collectionViewLayout as? UICollectionViewFlowLayout else { return }
+    let contentWidth = CGFloat(entries.count) * 20 + 12 + CGFloat(max(0, entries.count - 1)) * 3
+    let padding = max(0, (filmstrip.bounds.width - contentWidth) / 2)
+    let insets = UIEdgeInsets(top: 3, left: padding, bottom: 3, right: padding)
+    if layout.sectionInset != insets { layout.sectionInset = insets }
+    if needsFilmstripCentering {
+      filmstrip.layoutIfNeeded()
+      filmstrip.scrollToItem(at: IndexPath(item: currentIndex, section: 0),
+        at: .centeredHorizontally, animated: false)
+      needsFilmstripCentering = false
+    }
+  }
+
   override var preferredStatusBarStyle: UIStatusBarStyle {
     controlsHidden ? .lightContent : .darkContent
   }
@@ -1553,7 +1595,9 @@ private final class WatermarkMediaPagerViewController: UIViewController,
   private func glassGroup(_ content: UIView, radius: CGFloat) -> UIView {
     let effect: UIVisualEffect
     if #available(iOS 26.0, *) {
-      effect = UIGlassEffect(style: .regular)
+      let glassEffect = UIGlassEffect(style: .regular)
+      glassEffect.isInteractive = true
+      effect = glassEffect
     } else {
       effect = UIBlurEffect(style: .systemUltraThinMaterialLight)
     }
@@ -1575,13 +1619,13 @@ private final class WatermarkMediaPagerViewController: UIViewController,
   private func configureButton(_ button: UIButton, symbol: String, label: String,
                                action: Selector?) {
     button.setImage(UIImage(systemName: symbol,
-      withConfiguration: UIImage.SymbolConfiguration(pointSize: 23, weight: .regular)), for: .normal)
+      withConfiguration: UIImage.SymbolConfiguration(pointSize: 21, weight: .regular)), for: .normal)
     button.tintColor = .label
     button.accessibilityLabel = label
     button.translatesAutoresizingMaskIntoConstraints = false
     if let action { button.addTarget(self, action: action, for: .touchUpInside) }
     NSLayoutConstraint.activate([
-      button.widthAnchor.constraint(greaterThanOrEqualToConstant: 48),
+      button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
       button.heightAnchor.constraint(equalToConstant: 48),
     ])
   }
@@ -1653,27 +1697,81 @@ private final class WatermarkMediaPagerViewController: UIViewController,
       titleGlass.trailingAnchor.constraint(equalTo: moreGlass.leadingAnchor, constant: -16),
       titleGlass.topAnchor.constraint(equalTo: header.topAnchor),
       titleGlass.heightAnchor.constraint(equalToConstant: 48),
-      footer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
-      footer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
-      footer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
-      footer.heightAnchor.constraint(equalToConstant: 128),
+      footer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 28),
+      footer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -28),
+      footer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+      footer.heightAnchor.constraint(equalToConstant: 106),
       filmstrip.leadingAnchor.constraint(equalTo: footer.leadingAnchor),
       filmstrip.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
       filmstrip.topAnchor.constraint(equalTo: footer.topAnchor),
-      filmstrip.heightAnchor.constraint(equalToConstant: 60),
-      shareGlass.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 4),
+      filmstrip.heightAnchor.constraint(equalToConstant: 38),
+      shareGlass.leadingAnchor.constraint(equalTo: footer.leadingAnchor),
       shareGlass.bottomAnchor.constraint(equalTo: footer.bottomAnchor),
       shareGlass.widthAnchor.constraint(equalToConstant: 48),
       centerGlass.centerXAnchor.constraint(equalTo: footer.centerXAnchor),
       centerGlass.bottomAnchor.constraint(equalTo: footer.bottomAnchor),
-      centerGlass.widthAnchor.constraint(equalToConstant: 120),
-      deleteGlass.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -4),
+      centerGlass.widthAnchor.constraint(equalToConstant: 152),
+      deleteGlass.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
       deleteGlass.bottomAnchor.constraint(equalTo: footer.bottomAnchor),
       deleteGlass.widthAnchor.constraint(equalToConstant: 48),
     ])
   }
 
   @objc private func backToGallery() { navigationController?.popViewController(animated: true) }
+
+  func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    guard gestureRecognizer === dismissGesture else { return true }
+    guard !pageTransitionInProgress, !sharing, presentedViewController == nil,
+          navigationController?.topViewController === self,
+          let detail = pageController.viewControllers?.first as? WatermarkMediaDetailViewController,
+          detail.canDismissWithSwipe else { return false }
+    let velocity = dismissGesture.velocity(in: view)
+    return velocity.y > 0 && velocity.y > abs(velocity.x) * 1.2
+  }
+
+  @objc private func handleDismissPan(_ gesture: UIPanGestureRecognizer) {
+    let distance = max(0, gesture.translation(in: view).y)
+    let progress = min(1, distance / max(view.bounds.height * 0.45, 1))
+    switch gesture.state {
+    case .began, .changed:
+      let scale = 1 - progress * 0.08
+      pageController.view.transform = CGAffineTransform(translationX: 0, y: distance)
+        .scaledBy(x: scale, y: scale)
+      if !controlsHidden {
+        header.alpha = 1 - progress
+        footer.alpha = 1 - progress
+      }
+    case .ended:
+      let shouldReturn = distance > 110 || (distance > 30 && gesture.velocity(in: view).y > 850)
+      if shouldReturn {
+        dismissGesture.isEnabled = false
+        UIView.animate(withDuration: 0.18, animations: {
+          self.pageController.view.transform = CGAffineTransform(translationX: 0, y: self.view.bounds.height)
+          self.header.alpha = 0
+          self.footer.alpha = 0
+        }) { _ in
+          guard let navigationController = self.navigationController else {
+            preconditionFailure("The preview lost its navigation controller while returning to the gallery.")
+          }
+          navigationController.popViewController(animated: false)
+        }
+      } else {
+        restoreAfterDismissPan()
+      }
+    case .cancelled, .failed:
+      restoreAfterDismissPan()
+    default:
+      break
+    }
+  }
+
+  private func restoreAfterDismissPan() {
+    UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+      self.pageController.view.transform = .identity
+      self.header.alpha = self.controlsHidden ? 0 : 1
+      self.footer.alpha = self.controlsHidden ? 0 : 1
+    }
+  }
 
   private func updateDetailAppearance() {
     for case let detail as WatermarkMediaDetailViewController in pageController.viewControllers ?? [] {
@@ -1708,9 +1806,9 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     cell.setSelectionMode(false, selected: false)
     let scale = collectionView.traitCollection.displayScale
     cell.configure(with: entries[indexPath.item].asset,
-      targetSize: CGSize(width: 48 * scale, height: 56 * scale), showsMediaType: false)
-    cell.contentView.layer.borderWidth = indexPath.item == currentIndex ? 2 : 0
-    cell.contentView.layer.borderColor = UIColor.label.cgColor
+      targetSize: CGSize(width: 32 * scale, height: 32 * scale), showsMediaType: false)
+    cell.contentView.layer.cornerRadius = 4
+    cell.contentView.layer.borderWidth = 0
     cell.accessibilityLabel = "\(entries[indexPath.item].item.kind == "video" ? "视频" : "照片")，第 \(indexPath.item + 1) 项，共 \(entries.count) 项"
     cell.accessibilityTraits = indexPath.item == currentIndex ? [.button, .selected] : .button
     return cell
@@ -1718,7 +1816,7 @@ private final class WatermarkMediaPagerViewController: UIViewController,
 
   func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout,
                       sizeForItemAt indexPath: IndexPath) -> CGSize {
-    CGSize(width: indexPath.item == currentIndex ? 48 : 32, height: 56)
+    CGSize(width: indexPath.item == currentIndex ? 32 : 20, height: 32)
   }
 
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -1787,7 +1885,8 @@ private final class WatermarkMediaPagerViewController: UIViewController,
       item: entry.item,
       asset: entry.asset,
       onToggleControls: { [weak self] in self?.toggleControls() },
-      controlsHidden: controlsHidden
+      controlsHidden: controlsHidden,
+      dismissGesture: dismissGesture
     ) { [weak self] deletedIdentifier in
       self?.handleDeletedItem(identifier: deletedIdentifier)
     }
@@ -1825,7 +1924,7 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     display.setLocalizedDateFormatFromTemplate("HHmm")
     timeLabel.text = display.string(from: date)
     favoriteButton.setImage(UIImage(systemName: entry.asset.isFavorite ? "heart.fill" : "heart",
-      withConfiguration: UIImage.SymbolConfiguration(pointSize: 23)), for: .normal)
+      withConfiguration: UIImage.SymbolConfiguration(pointSize: 21)), for: .normal)
     favoriteButton.accessibilityLabel = entry.asset.isFavorite ? "取消收藏" : "收藏"
     moreButton.menu = UIMenu(children: [
       UIAction(title: "照片信息", image: UIImage(systemName: "info.circle")) { [weak self] _ in
@@ -1840,9 +1939,8 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     ])
     filmstrip.reloadData()
     filmstrip.collectionViewLayout.invalidateLayout()
-    filmstrip.layoutIfNeeded()
-    filmstrip.scrollToItem(at: IndexPath(item: currentIndex, section: 0),
-      at: .centeredHorizontally, animated: false)
+    needsFilmstripCentering = true
+    view.setNeedsLayout()
     updateDetailAppearance()
   }
 
@@ -2003,6 +2101,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
   private let asset: PHAsset
   private let onChange: (String) -> Void
   private let onToggleControls: () -> Void
+  private let dismissGesture: UIPanGestureRecognizer
   private var controlsHidden: Bool
   private let scrollView = UIScrollView()
   private let imageView = UIImageView()
@@ -2010,6 +2109,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
   private var imageRequestID: PHImageRequestID?
   private var lastViewportSize = CGSize.zero
   var mediaIdentifier: String { item.id }
+  var canDismissWithSwipe: Bool { item.kind != "photo" || scrollView.zoomScale <= 1.01 }
 
   init(
     journal: WatermarkMediaJournal,
@@ -2017,6 +2117,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
     asset: PHAsset,
     onToggleControls: @escaping () -> Void,
     controlsHidden: Bool,
+    dismissGesture: UIPanGestureRecognizer,
     onChange: @escaping (String) -> Void
   ) {
     self.journal = journal
@@ -2025,6 +2126,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
     self.onChange = onChange
     self.onToggleControls = onToggleControls
     self.controlsHidden = controlsHidden
+    self.dismissGesture = dismissGesture
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -2044,6 +2146,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
 
     if item.kind == "photo" {
       scrollView.delegate = self
+      scrollView.panGestureRecognizer.require(toFail: dismissGesture)
       scrollView.minimumZoomScale = 1
       scrollView.maximumZoomScale = 5
       scrollView.contentInsetAdjustmentBehavior = .never
@@ -2136,7 +2239,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
     controlsHidden = hidden
     loadViewIfNeeded()
     // 给照片保留工具栏空间；隐藏控件时释放整个安全区域。
-    additionalSafeAreaInsets = hidden ? .zero : UIEdgeInsets(top: 76, left: 0, bottom: 156, right: 0)
+    additionalSafeAreaInsets = hidden ? .zero : UIEdgeInsets(top: 76, left: 0, bottom: 126, right: 0)
     view.backgroundColor = hidden ? .black : .systemBackground
     statusLabel.textColor = hidden ? .white : .secondaryLabel
   }
