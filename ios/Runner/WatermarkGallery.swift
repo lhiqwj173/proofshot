@@ -924,9 +924,10 @@ private final class WatermarkMediaCell: UICollectionViewCell {
     contentView.layer.borderColor = GalleryPalette.accent.cgColor
   }
 
-  func configure(with asset: PHAsset) {
+  func configure(with asset: PHAsset, targetSize: CGSize = CGSize(width: 420, height: 420),
+                 showsMediaType: Bool = true) {
     representedIdentifier = asset.localIdentifier
-    typeLabel.isHidden = asset.mediaType != .video
+    typeLabel.isHidden = !showsMediaType || asset.mediaType != .video
     typeLabel.text = asset.mediaType == .video ? "视频" : nil
     progressView.startAnimating()
     let options = PHImageRequestOptions()
@@ -942,7 +943,7 @@ private final class WatermarkMediaCell: UICollectionViewCell {
     }
     imageRequestID = PHImageManager.default().requestImage(
       for: asset,
-      targetSize: CGSize(width: 420, height: 420),
+      targetSize: targetSize,
       contentMode: .aspectFill,
       options: options
     ) { [weak self] image, info in
@@ -1459,13 +1460,26 @@ private final class WatermarkGalleryViewController: UIViewController,
 
 private final class WatermarkMediaPagerViewController: UIViewController,
   UIPageViewControllerDataSource,
-  UIPageViewControllerDelegate
+  UIPageViewControllerDelegate,
+  UICollectionViewDataSource,
+  UICollectionViewDelegateFlowLayout
 {
   private let journal: WatermarkMediaJournal
   private let onChange: () -> Void
   private let pageController: UIPageViewController
   private var entries: [WatermarkGalleryEntry]
   private var currentIndex: Int
+  private let header = UIView()
+  private let footer = UIView()
+  private let dateLabel = UILabel()
+  private let timeLabel = UILabel()
+  private let favoriteButton = UIButton(type: .system)
+  private let shareButton = UIButton(type: .system)
+  private let moreButton = UIButton(type: .system)
+  private let filmstrip: UICollectionView
+  private var controlsHidden = false
+  private var pageTransitionInProgress = false
+  private var sharing = false
 
   init(
     journal: WatermarkMediaJournal,
@@ -1477,6 +1491,10 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     self.journal = journal
     self.entries = entries
     self.currentIndex = initialIndex
+    let layout = UICollectionViewFlowLayout()
+    layout.scrollDirection = .horizontal
+    layout.minimumLineSpacing = 4
+    filmstrip = UICollectionView(frame: .zero, collectionViewLayout: layout)
     self.onChange = onChange
     pageController = UIPageViewController(
       transitionStyle: .scroll,
@@ -1491,18 +1509,11 @@ private final class WatermarkMediaPagerViewController: UIViewController,
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    view.backgroundColor = .black
-    navigationItem.rightBarButtonItem = UIBarButtonItem(
-      title: "删除",
-      style: .plain,
-      target: self,
-      action: #selector(confirmDeleteCurrentItem)
-    )
-    navigationItem.rightBarButtonItem?.tintColor = .systemRed
+    view.backgroundColor = .systemBackground
 
     pageController.dataSource = self
     pageController.delegate = self
-    pageController.view.backgroundColor = .black
+    pageController.view.backgroundColor = .systemBackground
     pageController.view.translatesAutoresizingMaskIntoConstraints = false
     addChild(pageController)
     view.addSubview(pageController.view)
@@ -1518,7 +1529,210 @@ private final class WatermarkMediaPagerViewController: UIViewController,
       direction: .forward,
       animated: false
     )
+    buildPreviewControls()
     updateNavigationTitle()
+  }
+
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated)
+    overrideUserInterfaceStyle = .light
+    navigationController?.setNavigationBarHidden(true, animated: animated)
+  }
+
+  override func viewWillDisappear(_ animated: Bool) {
+    super.viewWillDisappear(animated)
+    if isMovingFromParent {
+      navigationController?.setNavigationBarHidden(false, animated: animated)
+    }
+  }
+
+  override var preferredStatusBarStyle: UIStatusBarStyle {
+    controlsHidden ? .lightContent : .darkContent
+  }
+
+  private func glassGroup(_ content: UIView, radius: CGFloat) -> UIView {
+    let effect: UIVisualEffect
+    if #available(iOS 26.0, *) {
+      effect = UIGlassEffect(style: .regular)
+    } else {
+      effect = UIBlurEffect(style: .systemUltraThinMaterialLight)
+    }
+    let glass = UIVisualEffectView(effect: effect)
+    glass.layer.cornerRadius = radius
+    glass.clipsToBounds = true
+    glass.translatesAutoresizingMaskIntoConstraints = false
+    content.translatesAutoresizingMaskIntoConstraints = false
+    glass.contentView.addSubview(content)
+    NSLayoutConstraint.activate([
+      content.leadingAnchor.constraint(equalTo: glass.contentView.leadingAnchor),
+      content.trailingAnchor.constraint(equalTo: glass.contentView.trailingAnchor),
+      content.topAnchor.constraint(equalTo: glass.contentView.topAnchor),
+      content.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor),
+    ])
+    return glass
+  }
+
+  private func configureButton(_ button: UIButton, symbol: String, label: String,
+                               action: Selector?) {
+    button.setImage(UIImage(systemName: symbol,
+      withConfiguration: UIImage.SymbolConfiguration(pointSize: 23, weight: .regular)), for: .normal)
+    button.tintColor = .label
+    button.accessibilityLabel = label
+    button.translatesAutoresizingMaskIntoConstraints = false
+    if let action { button.addTarget(self, action: action, for: .touchUpInside) }
+    NSLayoutConstraint.activate([
+      button.widthAnchor.constraint(greaterThanOrEqualToConstant: 48),
+      button.heightAnchor.constraint(equalToConstant: 48),
+    ])
+  }
+
+  private func buildPreviewControls() {
+    header.translatesAutoresizingMaskIntoConstraints = false
+    footer.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(header)
+    view.addSubview(footer)
+    let back = UIButton(type: .system)
+    configureButton(back, symbol: "chevron.left", label: "返回图库", action: #selector(backToGallery))
+    let backGlass = glassGroup(back, radius: 24)
+    header.addSubview(backGlass)
+
+    dateLabel.font = .preferredFont(forTextStyle: .headline)
+    timeLabel.font = .preferredFont(forTextStyle: .caption1)
+    for label in [dateLabel, timeLabel] {
+      label.textColor = .label
+      label.textAlignment = .center
+      label.adjustsFontForContentSizeCategory = true
+      label.adjustsFontSizeToFitWidth = true
+      label.minimumScaleFactor = 0.8
+    }
+    let dateStack = UIStackView(arrangedSubviews: [dateLabel, timeLabel])
+    dateStack.axis = .vertical
+    dateStack.distribution = .fillProportionally
+    dateStack.isLayoutMarginsRelativeArrangement = true
+    dateStack.layoutMargins = UIEdgeInsets(top: 5, left: 12, bottom: 5, right: 12)
+    let titleGlass = glassGroup(dateStack, radius: 24)
+    header.addSubview(titleGlass)
+    configureButton(moreButton, symbol: "ellipsis", label: "更多操作", action: nil)
+    moreButton.showsMenuAsPrimaryAction = true
+    let moreGlass = glassGroup(moreButton, radius: 24)
+    header.addSubview(moreGlass)
+
+    filmstrip.backgroundColor = .clear
+    filmstrip.showsHorizontalScrollIndicator = false
+    filmstrip.dataSource = self
+    filmstrip.delegate = self
+    filmstrip.register(WatermarkMediaCell.self,
+      forCellWithReuseIdentifier: WatermarkMediaCell.reuseIdentifier)
+    filmstrip.translatesAutoresizingMaskIntoConstraints = false
+    footer.addSubview(filmstrip)
+
+    configureButton(shareButton, symbol: "square.and.arrow.up", label: "分享", action: #selector(shareCurrentItem))
+    configureButton(favoriteButton, symbol: "heart", label: "收藏", action: #selector(toggleFavorite))
+    let info = UIButton(type: .system)
+    configureButton(info, symbol: "info.circle", label: "照片信息", action: #selector(showMediaInfo))
+    let delete = UIButton(type: .system)
+    configureButton(delete, symbol: "trash", label: "删除", action: #selector(confirmDeleteCurrentItem))
+    let shareGlass = glassGroup(shareButton, radius: 24)
+    let centerStack = UIStackView(arrangedSubviews: [favoriteButton, info])
+    centerStack.distribution = .fillEqually
+    let centerGlass = glassGroup(centerStack, radius: 24)
+    let deleteGlass = glassGroup(delete, radius: 24)
+    for group in [shareGlass, centerGlass, deleteGlass] { footer.addSubview(group) }
+    NSLayoutConstraint.activate([
+      header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+      header.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+      header.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+      header.heightAnchor.constraint(equalToConstant: 48),
+      backGlass.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+      backGlass.topAnchor.constraint(equalTo: header.topAnchor),
+      backGlass.widthAnchor.constraint(equalToConstant: 48),
+      moreGlass.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+      moreGlass.topAnchor.constraint(equalTo: header.topAnchor),
+      moreGlass.widthAnchor.constraint(equalToConstant: 48),
+      titleGlass.leadingAnchor.constraint(equalTo: backGlass.trailingAnchor, constant: 16),
+      titleGlass.trailingAnchor.constraint(equalTo: moreGlass.leadingAnchor, constant: -16),
+      titleGlass.topAnchor.constraint(equalTo: header.topAnchor),
+      titleGlass.heightAnchor.constraint(equalToConstant: 48),
+      footer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+      footer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+      footer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+      footer.heightAnchor.constraint(equalToConstant: 128),
+      filmstrip.leadingAnchor.constraint(equalTo: footer.leadingAnchor),
+      filmstrip.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
+      filmstrip.topAnchor.constraint(equalTo: footer.topAnchor),
+      filmstrip.heightAnchor.constraint(equalToConstant: 60),
+      shareGlass.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: 4),
+      shareGlass.bottomAnchor.constraint(equalTo: footer.bottomAnchor),
+      shareGlass.widthAnchor.constraint(equalToConstant: 48),
+      centerGlass.centerXAnchor.constraint(equalTo: footer.centerXAnchor),
+      centerGlass.bottomAnchor.constraint(equalTo: footer.bottomAnchor),
+      centerGlass.widthAnchor.constraint(equalToConstant: 120),
+      deleteGlass.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -4),
+      deleteGlass.bottomAnchor.constraint(equalTo: footer.bottomAnchor),
+      deleteGlass.widthAnchor.constraint(equalToConstant: 48),
+    ])
+  }
+
+  @objc private func backToGallery() { navigationController?.popViewController(animated: true) }
+
+  private func updateDetailAppearance() {
+    for case let detail as WatermarkMediaDetailViewController in pageController.viewControllers ?? [] {
+      detail.setControlsHidden(controlsHidden)
+    }
+  }
+
+  private func toggleControls() {
+    controlsHidden.toggle()
+    setNeedsStatusBarAppearanceUpdate()
+    UIView.animate(withDuration: 0.2) {
+      self.header.alpha = self.controlsHidden ? 0 : 1
+      self.footer.alpha = self.controlsHidden ? 0 : 1
+      self.view.backgroundColor = self.controlsHidden ? .black : .systemBackground
+      self.updateDetailAppearance()
+      self.view.layoutIfNeeded()
+    }
+    header.isUserInteractionEnabled = !controlsHidden
+    footer.isUserInteractionEnabled = !controlsHidden
+  }
+
+  func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+    entries.count
+  }
+
+  func collectionView(_ collectionView: UICollectionView,
+                      cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+    guard entries.indices.contains(indexPath.item),
+          let cell = collectionView.dequeueReusableCell(
+            withReuseIdentifier: WatermarkMediaCell.reuseIdentifier, for: indexPath) as? WatermarkMediaCell
+    else { preconditionFailure("Invalid preview thumbnail.") }
+    cell.setSelectionMode(false, selected: false)
+    let scale = collectionView.traitCollection.displayScale
+    cell.configure(with: entries[indexPath.item].asset,
+      targetSize: CGSize(width: 48 * scale, height: 56 * scale), showsMediaType: false)
+    cell.contentView.layer.borderWidth = indexPath.item == currentIndex ? 2 : 0
+    cell.contentView.layer.borderColor = UIColor.label.cgColor
+    cell.accessibilityLabel = "\(entries[indexPath.item].item.kind == "video" ? "视频" : "照片")，第 \(indexPath.item + 1) 项，共 \(entries.count) 项"
+    cell.accessibilityTraits = indexPath.item == currentIndex ? [.button, .selected] : .button
+    return cell
+  }
+
+  func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout,
+                      sizeForItemAt indexPath: IndexPath) -> CGSize {
+    CGSize(width: indexPath.item == currentIndex ? 48 : 32, height: 56)
+  }
+
+  func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+    guard !pageTransitionInProgress, !sharing, indexPath.item != currentIndex else { return }
+    precondition(entries.indices.contains(indexPath.item))
+    let direction: UIPageViewController.NavigationDirection = indexPath.item > currentIndex ? .forward : .reverse
+    currentIndex = indexPath.item
+    pageController.setViewControllers([makeDetailPage(at: currentIndex)], direction: direction, animated: false)
+    updateNavigationTitle()
+  }
+
+  func pageViewController(_ pageViewController: UIPageViewController,
+                          willTransitionTo pendingViewControllers: [UIViewController]) {
+    pageTransitionInProgress = true
   }
 
   func pageViewController(
@@ -1545,6 +1759,7 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     previousViewControllers: [UIViewController],
     transitionCompleted completed: Bool
   ) {
+    pageTransitionInProgress = false
     guard completed, let visiblePage = pageViewController.viewControllers?.first else {
       return
     }
@@ -1553,6 +1768,7 @@ private final class WatermarkMediaPagerViewController: UIViewController,
   }
 
   @objc private func confirmDeleteCurrentItem() {
+    guard !pageTransitionInProgress, !sharing else { return }
     guard let detail = pageController.viewControllers?.first
       as? WatermarkMediaDetailViewController
     else {
@@ -1569,7 +1785,9 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     return WatermarkMediaDetailViewController(
       journal: journal,
       item: entry.item,
-      asset: entry.asset
+      asset: entry.asset,
+      onToggleControls: { [weak self] in self?.toggleControls() },
+      controlsHidden: controlsHidden
     ) { [weak self] deletedIdentifier in
       self?.handleDeletedItem(identifier: deletedIdentifier)
     }
@@ -1585,16 +1803,174 @@ private final class WatermarkMediaPagerViewController: UIViewController,
   }
 
   private func updateNavigationTitle() {
-    navigationItem.title = "\(currentIndex + 1) / \(entries.count)"
+    let entry = entries[currentIndex]
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    var date = formatter.date(from: entry.item.capturedAt)
+    if date == nil {
+      formatter.formatOptions = [.withInternetDateTime]
+      date = formatter.date(from: entry.item.capturedAt)
+    }
+    guard let date else { preconditionFailure("Invalid capture date in the media index.") }
+    let display = DateFormatter()
+    display.locale = .autoupdatingCurrent
+    if Calendar.current.isDateInToday(date) {
+      dateLabel.text = "今天"
+    } else if Calendar.current.isDateInYesterday(date) {
+      dateLabel.text = "昨天"
+    } else {
+      display.setLocalizedDateFormatFromTemplate("yMMMd")
+      dateLabel.text = display.string(from: date)
+    }
+    display.setLocalizedDateFormatFromTemplate("HHmm")
+    timeLabel.text = display.string(from: date)
+    favoriteButton.setImage(UIImage(systemName: entry.asset.isFavorite ? "heart.fill" : "heart",
+      withConfiguration: UIImage.SymbolConfiguration(pointSize: 23)), for: .normal)
+    favoriteButton.accessibilityLabel = entry.asset.isFavorite ? "取消收藏" : "收藏"
+    moreButton.menu = UIMenu(children: [
+      UIAction(title: "照片信息", image: UIImage(systemName: "info.circle")) { [weak self] _ in
+        self?.showMediaInfo()
+      },
+      UIAction(title: "返回图库", image: UIImage(systemName: "square.grid.2x2")) { [weak self] _ in
+        self?.backToGallery()
+      },
+      UIAction(title: "删除", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
+        self?.confirmDeleteCurrentItem()
+      },
+    ])
+    filmstrip.reloadData()
+    filmstrip.collectionViewLayout.invalidateLayout()
+    filmstrip.layoutIfNeeded()
+    filmstrip.scrollToItem(at: IndexPath(item: currentIndex, section: 0),
+      at: .centeredHorizontally, animated: false)
+    updateDetailAppearance()
+  }
+
+  private func showOperationError(_ message: String) {
+    let alert = UIAlertController(title: "操作未完成", message: message, preferredStyle: .alert)
+    alert.addAction(UIAlertAction(title: "好", style: .default))
+    present(alert, animated: true)
+  }
+
+  @objc private func showMediaInfo() {
+    guard !pageTransitionInProgress, !sharing else { return }
+    let entry = entries[currentIndex]
+    var lines = [
+      "拍摄时间：\(dateLabel.text!) \(timeLabel.text!)",
+      "类型：\(entry.item.kind == "video" ? "水印视频" : "水印照片")",
+      "尺寸：\(entry.asset.pixelWidth) × \(entry.asset.pixelHeight)",
+      "第 \(currentIndex + 1) 项，共 \(entries.count) 项",
+    ]
+    if entry.asset.mediaType == .video {
+      lines.append(String(format: "时长：%.1f 秒", entry.asset.duration))
+    }
+    let alert = UIAlertController(title: "作品信息", message: lines.joined(separator: "\n"),
+      preferredStyle: .actionSheet)
+    alert.addAction(UIAlertAction(title: "完成", style: .cancel))
+    alert.popoverPresentationController?.sourceView = footer
+    alert.popoverPresentationController?.sourceRect = footer.bounds
+    present(alert, animated: true)
+  }
+
+  @objc private func toggleFavorite() {
+    guard !pageTransitionInProgress, favoriteButton.isEnabled else { return }
+    let entry = entries[currentIndex]
+    let isFavorite = !entry.asset.isFavorite
+    favoriteButton.isEnabled = false
+    PHPhotoLibrary.shared().performChanges {
+      PHAssetChangeRequest(for: entry.asset).isFavorite = isFavorite
+    } completionHandler: { [weak self] success, error in
+      DispatchQueue.main.async {
+        guard let self else { return }
+        self.favoriteButton.isEnabled = true
+        guard success else {
+          self.showOperationError(error?.localizedDescription ?? "系统未完成收藏操作。")
+          return
+        }
+        let fetched = PHAsset.fetchAssets(withLocalIdentifiers: [entry.item.id], options: nil)
+        guard let asset = fetched.firstObject else {
+          self.showOperationError("收藏已更新，但当前权限下无法重新读取此作品。请返回图库刷新。")
+          return
+        }
+        if let index = self.entries.firstIndex(where: { $0.item.id == entry.item.id }) {
+          self.entries[index] = WatermarkGalleryEntry(item: entry.item, asset: asset)
+          self.updateNavigationTitle()
+        }
+        self.onChange()
+      }
+    }
+  }
+
+  @objc private func shareCurrentItem() {
+    guard !pageTransitionInProgress, !sharing else { return }
+    let entry = entries[currentIndex]
+    let resourceType: PHAssetResourceType = entry.asset.mediaType == .video ? .video : .photo
+    guard let resource = PHAssetResource.assetResources(for: entry.asset).first(where: { $0.type == resourceType })
+    else {
+      showOperationError("无法读取作品的媒体文件。请返回图库刷新。")
+      return
+    }
+    sharing = true
+    shareButton.isEnabled = false
+    // 使用独立目录保留原文件扩展名，避免图片与视频分享时丢失媒体类型。
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString,
+      isDirectory: true)
+    let file = directory.appendingPathComponent(URL(fileURLWithPath: resource.originalFilename).lastPathComponent)
+    do {
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+    } catch {
+      sharing = false
+      shareButton.isEnabled = true
+      showOperationError(error.localizedDescription)
+      return
+    }
+    let options = PHAssetResourceRequestOptions()
+    options.isNetworkAccessAllowed = true
+    PHAssetResourceManager.default().writeData(for: resource, toFile: file, options: options) { [weak self] error in
+      DispatchQueue.main.async {
+        guard let self else {
+          do { try FileManager.default.removeItem(at: directory) }
+          catch { preconditionFailure("Share cleanup failed: \(error)") }
+          return
+        }
+        guard self.viewIfLoaded?.window != nil, !self.isMovingFromParent else {
+          do { try FileManager.default.removeItem(at: directory) }
+          catch { preconditionFailure("Share cleanup failed: \(error)") }
+          self.sharing = false
+          self.shareButton.isEnabled = true
+          return
+        }
+        if let error {
+          self.sharing = false
+          self.shareButton.isEnabled = true
+          do { try FileManager.default.removeItem(at: directory) }
+          catch { preconditionFailure("Share cleanup failed: \(error)") }
+          self.showOperationError(error.localizedDescription)
+          return
+        }
+        let activity = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        activity.popoverPresentationController?.sourceView = self.shareButton
+        activity.popoverPresentationController?.sourceRect = self.shareButton.bounds
+        activity.completionWithItemsHandler = { [weak self] _, _, _, activityError in
+          DispatchQueue.main.async {
+            do { try FileManager.default.removeItem(at: directory) }
+            catch { preconditionFailure("Share cleanup failed: \(error)") }
+            self?.sharing = false
+            self?.shareButton.isEnabled = true
+            if let activityError { self?.showOperationError(activityError.localizedDescription) }
+          }
+        }
+        self.present(activity, animated: true)
+      }
+    }
   }
 
   private func handleDeletedItem(identifier: String) {
     guard let deletedIndex = entries.firstIndex(where: { $0.item.id == identifier }),
           let currentPage = pageController.viewControllers?.first
-            as? WatermarkMediaDetailViewController,
-          currentPage.mediaIdentifier == identifier
+            as? WatermarkMediaDetailViewController
     else {
-      preconditionFailure("The deleted gallery item is not the active media page.")
+      preconditionFailure("The deleted gallery item or current page is missing.")
     }
     entries.remove(at: deletedIndex)
     onChange()
@@ -1603,7 +1979,13 @@ private final class WatermarkMediaPagerViewController: UIViewController,
       return
     }
 
-    currentIndex = min(deletedIndex, entries.count - 1)
+    if currentPage.mediaIdentifier != identifier {
+      guard let visibleIndex = entries.firstIndex(where: { $0.item.id == currentPage.mediaIdentifier })
+      else { preconditionFailure("The visible media page is missing after deletion.") }
+      currentIndex = visibleIndex
+    } else {
+      currentIndex = min(deletedIndex, entries.count - 1)
+    }
     let direction: UIPageViewController.NavigationDirection =
       deletedIndex < entries.count ? .forward : .reverse
     pageController.setViewControllers(
@@ -1620,22 +2002,29 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
   private let item: WatermarkMediaIndexItem
   private let asset: PHAsset
   private let onChange: (String) -> Void
+  private let onToggleControls: () -> Void
+  private var controlsHidden: Bool
   private let scrollView = UIScrollView()
   private let imageView = UIImageView()
   private let statusLabel = UILabel()
   private var imageRequestID: PHImageRequestID?
+  private var lastViewportSize = CGSize.zero
   var mediaIdentifier: String { item.id }
 
   init(
     journal: WatermarkMediaJournal,
     item: WatermarkMediaIndexItem,
     asset: PHAsset,
+    onToggleControls: @escaping () -> Void,
+    controlsHidden: Bool,
     onChange: @escaping (String) -> Void
   ) {
     self.journal = journal
     self.item = item
     self.asset = asset
     self.onChange = onChange
+    self.onToggleControls = onToggleControls
+    self.controlsHidden = controlsHidden
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -1646,8 +2035,8 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
   override func viewDidLoad() {
     super.viewDidLoad()
     title = item.kind == "video" ? "水印视频" : "水印照片"
-    view.backgroundColor = .black
-    statusLabel.textColor = .white
+    view.backgroundColor = controlsHidden ? .black : .systemBackground
+    statusLabel.textColor = controlsHidden ? .white : .secondaryLabel
     statusLabel.textAlignment = .center
     statusLabel.numberOfLines = 0
     statusLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1657,32 +2046,39 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
       scrollView.delegate = self
       scrollView.minimumZoomScale = 1
       scrollView.maximumZoomScale = 5
+      scrollView.contentInsetAdjustmentBehavior = .never
+      scrollView.showsHorizontalScrollIndicator = false
+      scrollView.showsVerticalScrollIndicator = false
       scrollView.translatesAutoresizingMaskIntoConstraints = false
       view.addSubview(scrollView)
       imageView.contentMode = .scaleAspectFit
-      imageView.translatesAutoresizingMaskIntoConstraints = false
+      imageView.isAccessibilityElement = true
+      imageView.accessibilityLabel = "水印照片，双击放大，单击隐藏或显示工具栏"
       scrollView.addSubview(imageView)
       NSLayoutConstraint.activate([
         scrollView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
         scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
         scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
         scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
-        imageView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
-        imageView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
-        imageView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
-        imageView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
-        imageView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
-        imageView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor),
         statusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
         statusLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         statusLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
         statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24),
       ])
+      let doubleTap = UITapGestureRecognizer(target: self, action: #selector(zoomPhoto(_:)))
+      doubleTap.numberOfTapsRequired = 2
+      let singleTap = UITapGestureRecognizer(target: self, action: #selector(togglePreviewControls))
+      singleTap.require(toFail: doubleTap)
+      scrollView.addGestureRecognizer(singleTap)
+      scrollView.addGestureRecognizer(doubleTap)
       loadPhoto()
     } else {
       let playButton = UIButton(type: .system)
       imageView.contentMode = .scaleAspectFit
       imageView.translatesAutoresizingMaskIntoConstraints = false
+      imageView.isUserInteractionEnabled = true
+      imageView.addGestureRecognizer(UITapGestureRecognizer(target: self,
+        action: #selector(togglePreviewControls)))
       view.addSubview(imageView)
       playButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
       playButton.backgroundColor = UIColor.black.withAlphaComponent(0.55)
@@ -1700,7 +2096,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
         playButton.widthAnchor.constraint(equalToConstant: 72),
         playButton.heightAnchor.constraint(equalToConstant: 72),
         playButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-        playButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+        playButton.centerYAnchor.constraint(equalTo: imageView.centerYAnchor),
         statusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
         statusLabel.topAnchor.constraint(equalTo: playButton.bottomAnchor, constant: 20),
         statusLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
@@ -1708,6 +2104,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
       ])
       loadVideoPoster()
     }
+    setControlsHidden(controlsHidden)
     view.bringSubviewToFront(statusLabel)
   }
 
@@ -1719,17 +2116,53 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
 
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
-    if item.kind == "photo", let image = imageView.image {
-      scrollView.contentSize = imageView.bounds.size
+    if item.kind == "photo", let image = imageView.image,
+       scrollView.bounds.width > 0, scrollView.bounds.height > 0,
+       lastViewportSize != scrollView.bounds.size {
+      lastViewportSize = scrollView.bounds.size
+      scrollView.zoomScale = 1
       let fitScale = min(
         scrollView.bounds.width / image.size.width,
         scrollView.bounds.height / image.size.height
       )
-      scrollView.minimumZoomScale = max(0.1, fitScale)
-      if scrollView.zoomScale < scrollView.minimumZoomScale {
-        scrollView.zoomScale = scrollView.minimumZoomScale
-      }
+      imageView.frame = CGRect(origin: .zero,
+        size: CGSize(width: image.size.width * fitScale, height: image.size.height * fitScale))
+      scrollView.contentSize = imageView.bounds.size
     }
+    centerPhoto()
+  }
+
+  func setControlsHidden(_ hidden: Bool) {
+    controlsHidden = hidden
+    loadViewIfNeeded()
+    // 给照片保留工具栏空间；隐藏控件时释放整个安全区域。
+    additionalSafeAreaInsets = hidden ? .zero : UIEdgeInsets(top: 76, left: 0, bottom: 156, right: 0)
+    view.backgroundColor = hidden ? .black : .systemBackground
+    statusLabel.textColor = hidden ? .white : .secondaryLabel
+  }
+
+  @objc private func togglePreviewControls() { onToggleControls() }
+
+  @objc private func zoomPhoto(_ gesture: UITapGestureRecognizer) {
+    guard imageView.image != nil else { return }
+    if scrollView.zoomScale > 1.01 {
+      scrollView.setZoomScale(1, animated: true)
+    } else {
+      let point = gesture.location(in: imageView)
+      let scale: CGFloat = 2.5
+      let size = CGSize(width: scrollView.bounds.width / scale, height: scrollView.bounds.height / scale)
+      scrollView.zoom(to: CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2,
+        width: size.width, height: size.height), animated: true)
+    }
+  }
+
+  func scrollViewDidZoom(_ scrollView: UIScrollView) { centerPhoto() }
+
+  private func centerPhoto() {
+    guard item.kind == "photo", imageView.image != nil else { return }
+    let size = scrollView.contentSize
+    imageView.center = CGPoint(x: max(size.width, scrollView.bounds.width) / 2,
+      y: max(size.height, scrollView.bounds.height) / 2)
   }
 
   func viewForZooming(in scrollView: UIScrollView) -> UIView? {
@@ -1872,6 +2305,7 @@ private final class WatermarkMediaDetailViewController: UIViewController, UIScro
         if let image {
           self.imageView.image = image
           self.statusLabel.text = nil
+          self.lastViewportSize = .zero
           self.view.setNeedsLayout()
         } else if let error = info?[PHImageErrorKey] as? Error {
           self.statusLabel.text = "照片读取失败：\(error.localizedDescription)"
