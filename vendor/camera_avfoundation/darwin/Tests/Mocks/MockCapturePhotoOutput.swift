@@ -16,6 +16,8 @@ final class MockCapturePhotoOutput: NSObject, CapturePhotoOutput {
   var maxPhotoDimensions = CMVideoDimensions()
   var supportedFlashModes: [AVCaptureDevice.FlashMode] = []
   var isShutterSoundSuppressionSupported = true
+  var isZeroShutterLagSupported = false
+  var isZeroShutterLagEnabled = false
 
   // Stub that is called when the corresponding public method is called.
   var capturePhotoWithSettingsStub:

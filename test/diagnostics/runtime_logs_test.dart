@@ -93,5 +93,21 @@ void main() {
     expect(rotatedExport.paths.first, endsWith('runtime.1.jsonl'));
     expect(rotatedExport.paths.last, endsWith('runtime.jsonl'));
     expect(rotatedExport.damagedLines, greaterThan(0));
+
+    bool shutterRequested = false;
+    final capture = logs.trace<String>('camera.take_photo', () async {
+      shutterRequested = true;
+      return 'captured';
+    }, startImmediately: true);
+    expect(shutterRequested, isTrue);
+    expect(await capture, 'captured');
+    await expectLater(
+      logs.trace<void>(
+        'camera.take_photo',
+        () async => throw StateError('capture failed'),
+        startImmediately: true,
+      ),
+      throwsStateError,
+    );
   });
 }

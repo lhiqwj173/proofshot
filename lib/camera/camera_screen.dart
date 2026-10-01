@@ -47,6 +47,14 @@ class _CameraScreenState extends State<CameraScreen> {
   int _thumbnailGeneration = 0;
   bool _isShuttingDown = false;
   bool _mediaBusy = false;
+  bool _photoCaptureBusy = false;
+  int _pendingPhotoCount = 0;
+  static const int _maxPendingPhotos = 2;
+
+  bool get _photoCaptureAvailable =>
+      !_photoCaptureBusy &&
+      _pendingPhotoCount < _maxPendingPhotos &&
+      (!_mediaBusy || _pendingPhotoCount > 0);
   bool _handlingInterruptedRecording = false;
   bool _settingsOpen = false;
   bool _galleryOpen = false;
@@ -331,7 +339,7 @@ class _CameraScreenState extends State<CameraScreen> {
         _cameraCoordinator.captureMode != CameraCaptureMode.photo ||
         _locationText == null ||
         _locationLoading ||
-        _mediaBusy ||
+        !_photoCaptureAvailable ||
         _isShuttingDown ||
         _settingsOpen ||
         _galleryOpen) {
@@ -340,6 +348,12 @@ class _CameraScreenState extends State<CameraScreen> {
     if (_mediaMessage != null && mounted) {
       setState(() => _mediaMessage = null);
     }
+    setState(() {
+      _photoCaptureBusy = true;
+      _pendingPhotoCount++;
+    });
+    _syncHardwareCapture();
+    bool captureCompleted = false;
     try {
       final String location = _locationForCapture();
       final WatermarkSnapshot snapshot = _snapshotAt(location, DateTime.now());
@@ -347,7 +361,14 @@ class _CameraScreenState extends State<CameraScreen> {
         'camera.take_photo',
         _cameraCoordinator.takePicture,
         context: const <String, Object?>{'during_recording': false},
+        startImmediately: true,
       );
+      captureCompleted = true;
+      _photoCaptureBusy = false;
+      if (mounted) {
+        setState(() {});
+        _syncHardwareCapture();
+      }
       await Future.wait<void>(<Future<void>>[
         RuntimeLogs.instance.trace(
           'haptics.impact',
@@ -361,7 +382,14 @@ class _CameraScreenState extends State<CameraScreen> {
       );
       _showMediaError(error);
     } finally {
-      await _finishCameraProcessingIfPossible();
+      if (!captureCompleted) {
+        _photoCaptureBusy = false;
+      }
+      _pendingPhotoCount--;
+      if (mounted) {
+        setState(() {});
+        _syncHardwareCapture();
+      }
     }
   }
 
@@ -485,6 +513,7 @@ class _CameraScreenState extends State<CameraScreen> {
         'camera.take_photo_during_recording',
         _cameraCoordinator.takePictureDuringRecording,
         context: const <String, Object?>{'during_recording': true},
+        startImmediately: true,
       );
       await Future.wait<void>(<Future<void>>[
         RuntimeLogs.instance.trace(
@@ -630,7 +659,7 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _restorePendingMedia() async {
-    if (_mediaBusy || _pendingMedia.isEmpty) {
+    if (_mediaBusy || _pendingPhotoCount > 0 || _pendingMedia.isEmpty) {
       return;
     }
     PendingWatermarkMedia? pending;
@@ -847,7 +876,7 @@ class _CameraScreenState extends State<CameraScreen> {
         _cameraCoordinator.captureMode == CameraCaptureMode.photo &&
         _locationText != null &&
         !_locationLoading &&
-        !_mediaBusy &&
+        _photoCaptureAvailable &&
         !_settingsOpen &&
         !_galleryOpen;
     if (_hardwareCaptureEnabled == enabled) {
@@ -1017,7 +1046,12 @@ class _CameraScreenState extends State<CameraScreen> {
     final bool isRecording = cameraState == CameraSessionState.recording;
     final bool isReady = cameraState == CameraSessionState.ready;
     final bool canCapture =
-        isReady && _locationText != null && !_mediaBusy && !_locationLoading;
+        isReady &&
+        _locationText != null &&
+        !_locationLoading &&
+        (_cameraCoordinator.captureMode == CameraCaptureMode.photo
+            ? _photoCaptureAvailable
+            : !_mediaBusy && _pendingPhotoCount == 0);
     final VoidCallback? onPressed = isRecording
         ? () => unawaited(_stopVideoRecording())
         : !canCapture
@@ -1031,7 +1065,10 @@ class _CameraScreenState extends State<CameraScreen> {
         ? '拍摄照片'
         : '开始录像';
     final Widget centerMark =
-        _mediaBusy || cameraState == CameraSessionState.processing
+        cameraState == CameraSessionState.processing ||
+            (_cameraCoordinator.captureMode == CameraCaptureMode.photo
+                ? !_photoCaptureAvailable
+                : _mediaBusy)
         ? const SizedBox.square(
             dimension: 28,
             child: CircularProgressIndicator(

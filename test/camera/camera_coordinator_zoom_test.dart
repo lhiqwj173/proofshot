@@ -3,11 +3,58 @@ import 'dart:math' show Point;
 
 import 'package:camera_platform_interface/camera_platform_interface.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proofshot/camera/camera_coordinator.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('原片采集完成即恢复快门，不等待调用者的水印与相册保存', () async {
+    final CameraPlatform original = CameraPlatform.instance;
+    final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
+    CameraPlatform.instance = platform;
+    final CameraCoordinator coordinator = CameraCoordinator();
+    try {
+      await coordinator.initialize();
+      final Completer<XFile> source = Completer<XFile>();
+      platform.nextPhoto = source;
+      final Future<XFile> firstCapture = coordinator.takePicture();
+      await Future<void>.delayed(Duration.zero);
+      expect(coordinator.state, CameraSessionState.processing);
+      expect(platform.photoCount, 1);
+      source.complete(XFile('first_photo.jpg'));
+      expect((await firstCapture).path, 'first_photo.jpg');
+      expect(coordinator.state, CameraSessionState.ready);
+      await coordinator.takePicture();
+      expect(platform.photoCount, 2);
+      expect(coordinator.state, CameraSessionState.ready);
+    } finally {
+      await coordinator.shutdown();
+      CameraPlatform.instance = original;
+    }
+  });
+
+  test('采集期间切入后台不恢复可拍摄状态', () async {
+    final CameraPlatform original = CameraPlatform.instance;
+    final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
+    CameraPlatform.instance = platform;
+    final CameraCoordinator coordinator = CameraCoordinator();
+    try {
+      await coordinator.initialize();
+      final Completer<XFile> source = Completer<XFile>();
+      platform.nextPhoto = source;
+      final Future<XFile> capture = coordinator.takePicture();
+      await Future<void>.delayed(Duration.zero);
+      coordinator.didChangeAppLifecycleState(AppLifecycleState.inactive);
+      source.complete(XFile('background_photo.jpg'));
+      await capture;
+      expect(coordinator.state, CameraSessionState.interrupted);
+    } finally {
+      await coordinator.shutdown();
+      CameraPlatform.instance = original;
+    }
+  });
 
   test('照片与录像切换分别使用最高照片分辨率与 1080p 有声录像配置', () async {
     final CameraPlatform original = CameraPlatform.instance;
@@ -312,6 +359,7 @@ class _ZoomCameraPlatform extends CameraPlatform {
   FocusMode? lastFocusMode;
   Point<double>? lastFocusPoint;
   int photoCount = 0;
+  Completer<XFile>? nextPhoto;
   final List<MediaSettings> settings = <MediaSettings>[];
 
   @override
@@ -399,6 +447,11 @@ class _ZoomCameraPlatform extends CameraPlatform {
   @override
   Future<XFile> takePicture(int cameraId) async {
     photoCount++;
+    final Completer<XFile>? deferred = nextPhoto;
+    nextPhoto = null;
+    if (deferred != null) {
+      return deferred.future;
+    }
     return XFile('video_photo.jpg');
   }
 

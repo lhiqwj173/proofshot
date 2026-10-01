@@ -9,7 +9,7 @@ import XCTest
 
 /// Includes test cases related to the `start` method of the Camera class.
 final class CameraStartTests: XCTestCase {
-  func testStart_setsMaxPhotoDimensionsToTheLargestSupportedByTheActiveFormat() throws {
+  func testStart_uses12MPInsteadOf24MPOr48MP() throws {
     guard #available(iOS 16.0, *) else {
       throw XCTSkip("maxPhotoDimensions requires iOS 16.")
     }
@@ -19,6 +19,8 @@ final class CameraStartTests: XCTestCase {
       CMVideoDimensions(width: 1920, height: 1080),
       CMVideoDimensions(width: 4032, height: 3024),
       CMVideoDimensions(width: 3264, height: 2448),
+      CMVideoDimensions(width: 5712, height: 4284),
+      CMVideoDimensions(width: 8064, height: 6048),
     ]
     let captureDeviceMock = MockCaptureDevice()
     captureDeviceMock.activeFormatStub = { activeFormatMock }
@@ -34,6 +36,37 @@ final class CameraStartTests: XCTestCase {
 
     XCTAssertEqual(mockOutput.maxPhotoDimensions.width, 4032)
     XCTAssertEqual(mockOutput.maxPhotoDimensions.height, 3024)
+  }
+
+  func testStart_usesSmallestSupportedDimensionWhenAllExceed12MP() throws {
+    guard #available(iOS 16.0, *) else { throw XCTSkip("Requires iOS 16.") }
+    let format = MockCaptureDeviceFormat()
+    format.supportedMaxPhotoDimensions = [
+      CMVideoDimensions(width: 8064, height: 6048),
+      CMVideoDimensions(width: 5712, height: 4284),
+    ]
+    let device = MockCaptureDevice()
+    device.activeFormatStub = { format }
+    let configuration = CameraTestUtils.createTestCameraConfiguration()
+    configuration.videoCaptureDeviceFactory = { _ in device }
+    let camera = CameraTestUtils.createTestCamera(configuration)
+    let output = MockCapturePhotoOutput()
+    camera.capturePhotoOutput = output
+    camera.start()
+    XCTAssertEqual(output.maxPhotoDimensions.width, 5712)
+    XCTAssertEqual(output.maxPhotoDimensions.height, 4284)
+  }
+
+  func testStart_enablesZeroShutterLagOnlyWhenSupported() throws {
+    guard #available(iOS 17.0, *) else { throw XCTSkip("Requires iOS 17.") }
+    for supported in [false, true] {
+      let camera = CameraTestUtils.createTestCamera()
+      let output = MockCapturePhotoOutput()
+      output.isZeroShutterLagSupported = supported
+      camera.capturePhotoOutput = output
+      camera.start()
+      XCTAssertEqual(output.isZeroShutterLagEnabled, supported)
+    }
   }
 
   func testStart_selectsTheWideAngleLensOfAVirtualDevice() {

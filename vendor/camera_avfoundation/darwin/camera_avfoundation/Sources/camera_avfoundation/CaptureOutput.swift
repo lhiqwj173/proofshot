@@ -56,6 +56,12 @@ protocol CapturePhotoOutput: CaptureOutput {
   /// The highest photo quality mode prepared by the capture pipeline.
   var maxPhotoQualityPrioritization: AVCapturePhotoOutput.QualityPrioritization { get set }
 
+  @available(iOS 17.0, *)
+  var isZeroShutterLagSupported: Bool { get }
+
+  @available(iOS 17.0, *)
+  var isZeroShutterLagEnabled: Bool { get set }
+
   /// Corresponds to the `isHighResolutionCaptureEnabled` property of `AVCapturePhotoOutput`
   var isHighResolutionCaptureEnabled: Bool { get set }
 

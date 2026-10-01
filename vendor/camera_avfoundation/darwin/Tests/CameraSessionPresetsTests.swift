@@ -22,7 +22,7 @@ final class CameraSessionPresetsTests: XCTestCase {
       resolutionPreset: .max)
     configuration.mediaSettings.enableAudio = false
     let camera = try DefaultCamera(configuration: configuration)
-    XCTAssertEqual(camera.capturePhotoOutput.maxPhotoQualityPrioritization, .quality)
+    XCTAssertEqual(camera.capturePhotoOutput.maxPhotoQualityPrioritization, .balanced)
     waitForExpectations(timeout: 5, handler: nil)
   }
 

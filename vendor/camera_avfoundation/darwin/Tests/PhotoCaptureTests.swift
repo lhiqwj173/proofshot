@@ -25,7 +25,7 @@ final class PhotoCaptureTests: XCTestCase {
     output.isShutterSoundSuppressionSupported = true
     output.capturePhotoWithSettingsStub = { settings, _ in
       XCTAssertTrue(settings.isShutterSoundSuppressionEnabled)
-      XCTAssertEqual(settings.photoQualityPrioritization, .quality)
+      XCTAssertEqual(settings.photoQualityPrioritization, .balanced)
       captured.fulfill()
     }
     cam.capturePhotoOutput = output

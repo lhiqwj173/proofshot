@@ -88,17 +88,29 @@ class RuntimeLogs {
     String code,
     Future<T> Function() action, {
     Map<String, Object?> context = const <String, Object?>{},
+    bool startImmediately = false,
   }) async {
     final timer = Stopwatch()..start();
     final operationId = '$_sessionId-${++_operationSequence}';
-    await event(
+    final Future<void> startLog = event(
       code,
       phase: 'start',
       context: context,
       operationId: operationId,
     );
     try {
-      final result = await action();
+      late final T result;
+      if (startImmediately) {
+        // 快门请求直接发出，日志仍按序写入并传播错误。
+        Future<void> runAction() async {
+          result = await action();
+        }
+
+        await Future.wait<void>(<Future<void>>[startLog, runAction()]);
+      } else {
+        await startLog;
+        result = await action();
+      }
       await event(
         code,
         phase: 'success',

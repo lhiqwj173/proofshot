@@ -226,7 +226,7 @@ final class DefaultCamera: NSObject, Camera {
 
     videoCaptureSession.addOutput(capturePhotoOutput.avOutput)
     // Configure before the session starts: changing this while running rebuilds the pipeline.
-    capturePhotoOutput.maxPhotoQualityPrioritization = .quality
+    capturePhotoOutput.maxPhotoQualityPrioritization = .balanced
 
     motionManager.startAccelerometerUpdates()
 
@@ -534,6 +534,9 @@ final class DefaultCamera: NSObject, Camera {
 
   func start() {
     configureMaxPhotoDimensions()
+    if #available(iOS 17.0, *), capturePhotoOutput.isZeroShutterLagSupported {
+      capturePhotoOutput.isZeroShutterLagEnabled = true
+    }
     applyInitialZoom()
 
     videoCaptureSession.startRunning()
@@ -561,15 +564,17 @@ final class DefaultCamera: NSObject, Camera {
     captureDevice.unlockForConfiguration()
   }
 
-  /// Configures `capturePhotoOutput` to allow capturing at the active format's highest supported
-  /// resolution. Must be called whenever `captureDevice` changes, since the active format's
-  /// supported dimensions can change with it.
+  /// 使用设备支持的约 1200 万像素档位，控制采集、JPEG 编码和水印渲染开销。
+  /// 若设备没有该范围内的档位，使用其最小支持尺寸，不生成非法尺寸。
   private func configureMaxPhotoDimensions() {
     if #available(iOS 16.0, *) {
       // If the active format reports no supported dimensions, `capturePhotoOutput` keeps
       // AVFoundation's own default rather than being left unconfigured.
       if let maxSupportedDimensions = captureDevice.flutterActiveFormat.supportedMaxPhotoDimensions
-        .max(by: { Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height) })
+        .sorted(by: { Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height) })
+        .last(where: { Int64($0.width) * Int64($0.height) <= 12_600_000 })
+        ?? captureDevice.flutterActiveFormat.supportedMaxPhotoDimensions
+          .min(by: { Int64($0.width) * Int64($0.height) < Int64($1.width) * Int64($1.height) })
       {
         capturePhotoOutput.maxPhotoDimensions = maxSupportedDimensions
       }
@@ -817,8 +822,8 @@ final class DefaultCamera: NSObject, Camera {
       settings.flashMode = getAVCaptureFlashMode(for: flashMode)
     }
 
-    // 静态照片优先画质；录像抓拍使用平衡模式，避免长时间占用采集管线。
-    settings.photoQualityPrioritization = isRecording ? .balanced : .quality
+    // 保留系统快速多帧融合，避免每张照片都等待最高画质处理。
+    settings.photoQualityPrioritization = .balanced
 
     if #available(iOS 18.0, *) {
       guard capturePhotoOutput.isShutterSoundSuppressionSupported else {

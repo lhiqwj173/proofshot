@@ -341,7 +341,13 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
       final CameraController controller = _requireController();
       _setState(CameraSessionState.processing);
       try {
-        return await controller.takePicture();
+        final XFile source = await controller.takePicture();
+        _setState(
+          _isBackgrounded
+              ? CameraSessionState.interrupted
+              : CameraSessionState.ready,
+        );
+        return source;
       } on CameraException catch (error) {
         _recordCameraException(error);
         rethrow;
