@@ -9,6 +9,35 @@ import 'package:proofshot/camera/camera_coordinator.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('照片与录像切换分别使用最高照片分辨率与 1080p 有声录像配置', () async {
+    final CameraPlatform original = CameraPlatform.instance;
+    final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
+    CameraPlatform.instance = platform;
+    final CameraCoordinator coordinator = CameraCoordinator();
+    try {
+      await coordinator.initialize();
+      expect(platform.settings.last.resolutionPreset, ResolutionPreset.max);
+      expect(platform.settings.last.enableAudio, isFalse);
+      await coordinator.setFocusPoint(const Offset(0.2, 0.8));
+      await coordinator.setCaptureMode(CameraCaptureMode.video);
+      expect(
+        platform.settings.last.resolutionPreset,
+        ResolutionPreset.veryHigh,
+      );
+      expect(platform.settings.last.enableAudio, isTrue);
+      expect(platform.lastFocusPoint, const Point<double>(0.2, 0.8));
+      expect(platform.lastFocusMode, FocusMode.auto);
+      await coordinator.setCaptureMode(CameraCaptureMode.photo);
+      expect(platform.settings.last.resolutionPreset, ResolutionPreset.max);
+      expect(platform.settings.last.enableAudio, isFalse);
+      expect(platform.disposedCameras, hasLength(2));
+      expect(coordinator.state, CameraSessionState.ready);
+    } finally {
+      await coordinator.shutdown();
+      CameraPlatform.instance = original;
+    }
+  });
+
   test('后摄 0.5x 到 2x 全程在同一镜头上变焦，不重建控制器', () async {
     final CameraPlatform original = CameraPlatform.instance;
     final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
@@ -188,7 +217,7 @@ void main() {
     }
   });
 
-  test('点按取景区自动切换手动对焦，并可切回持续自动对焦', () async {
+  test('点按取景区保持持续自动对焦，并可重置对焦点', () async {
     final CameraPlatform original = CameraPlatform.instance;
     final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
     CameraPlatform.instance = platform;
@@ -197,8 +226,8 @@ void main() {
       await coordinator.initialize();
       expect(coordinator.focusMode, FocusMode.auto);
       await coordinator.setFocusPoint(const Offset(0.25, 0.7));
-      expect(coordinator.focusMode, FocusMode.locked);
-      expect(platform.lastFocusMode, FocusMode.locked);
+      expect(coordinator.focusMode, FocusMode.auto);
+      expect(platform.lastFocusMode, FocusMode.auto);
       expect(platform.lastFocusPoint, const Point<double>(0.25, 0.7));
       expect(coordinator.focusPoint, const Offset(0.25, 0.7));
 
@@ -283,6 +312,7 @@ class _ZoomCameraPlatform extends CameraPlatform {
   FocusMode? lastFocusMode;
   Point<double>? lastFocusPoint;
   int photoCount = 0;
+  final List<MediaSettings> settings = <MediaSettings>[];
 
   @override
   Future<List<CameraDescription>> availableCameras() async =>
@@ -296,6 +326,7 @@ class _ZoomCameraPlatform extends CameraPlatform {
     final int id = _cameras.length + 1;
     _cameras[id] = cameraDescription;
     createdCameras.add(id);
+    settings.add(mediaSettings);
     return id;
   }
 

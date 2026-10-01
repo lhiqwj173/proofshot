@@ -172,7 +172,11 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
         _flashMode = FlashMode.off;
       }
       _captureMode = mode;
-      notifyListeners();
+      await _installController(
+        _requireSelectedCamera(),
+        enableAudio: mode == CameraCaptureMode.video,
+        flashToRestore: _flashMode,
+      );
     });
   }
 
@@ -215,7 +219,7 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
       if (mode == FocusMode.locked && !focusPointSupported) {
         throw StateError('The selected camera does not support focus points.');
       }
-      if (_focusMode == mode) {
+      if (_focusMode == mode && _focusPoint == null) {
         return;
       }
       final CameraController controller = _requireController();
@@ -260,15 +264,11 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
       }
       try {
         final CameraController controller = _requireController();
-        if (_focusMode != FocusMode.locked) {
-          await controller.setFocusMode(FocusMode.locked);
-        }
         await controller.setFocusPoint(point);
       } on CameraException catch (error) {
         _recordCameraException(error);
         rethrow;
       }
-      _focusMode = FocusMode.locked;
       _focusPoint = point;
       notifyListeners();
     });
@@ -325,7 +325,7 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
       _setState(CameraSessionState.initializing);
       await _installController(
         targetCamera,
-        enableAudio: false,
+        enableAudio: _captureMode == CameraCaptureMode.video,
         flashToRestore: FlashMode.off,
       );
     });
@@ -539,7 +539,7 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
     _selectedCamera = camera;
     await _installController(
       camera,
-      enableAudio: false,
+      enableAudio: _captureMode == CameraCaptureMode.video,
       flashToRestore: FlashMode.off,
     );
   }
@@ -565,7 +565,9 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
     final int operationGeneration = ++_generation;
     final CameraController candidate = CameraController(
       camera,
-      ResolutionPreset.veryHigh,
+      _captureMode == CameraCaptureMode.photo
+          ? ResolutionPreset.max
+          : ResolutionPreset.veryHigh,
       enableAudio: enableAudio,
     );
     _setState(CameraSessionState.initializing);
@@ -593,9 +595,7 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
           ? _focusMode
           : FocusMode.auto;
       await candidate.setFocusMode(modeToRestore);
-      if (supportsFocusPoint &&
-          _focusPoint != null &&
-          modeToRestore == FocusMode.locked) {
+      if (supportsFocusPoint && _focusPoint != null) {
         await candidate.setFocusPoint(_focusPoint);
       }
       if (!_isCurrentGeneration(operationGeneration)) {

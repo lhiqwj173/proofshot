@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -19,6 +18,7 @@ import 'camera_coordinator.dart';
 import 'capture_haptics.dart';
 import 'hardware_capture_bridge.dart';
 import 'zoom_control.dart';
+import 'viewfinder_geometry.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({required this.settings, super.key});
@@ -343,17 +343,16 @@ class _CameraScreenState extends State<CameraScreen> {
     try {
       final String location = _locationForCapture();
       final WatermarkSnapshot snapshot = _snapshotAt(location, DateTime.now());
-      final Future<void> haptics = RuntimeLogs.instance.trace(
-        'haptics.impact',
-        _captureHaptics.captureImpact,
-      );
       final XFile source = await RuntimeLogs.instance.trace(
         'camera.take_photo',
         _cameraCoordinator.takePicture,
         context: const <String, Object?>{'during_recording': false},
       );
       await Future.wait<void>(<Future<void>>[
-        haptics,
+        RuntimeLogs.instance.trace(
+          'haptics.impact',
+          _captureHaptics.captureImpact,
+        ),
         _processCapturedMedia(source, snapshot, 'photo'),
       ]);
     } on Object catch (error, stack) {
@@ -482,17 +481,16 @@ class _CameraScreenState extends State<CameraScreen> {
         _locationForCapture(),
         DateTime.now(),
       );
-      final Future<void> haptics = RuntimeLogs.instance.trace(
-        'haptics.impact',
-        _captureHaptics.captureImpact,
-      );
       final XFile source = await RuntimeLogs.instance.trace(
         'camera.take_photo_during_recording',
         _cameraCoordinator.takePictureDuringRecording,
         context: const <String, Object?>{'during_recording': true},
       );
       await Future.wait<void>(<Future<void>>[
-        haptics,
+        RuntimeLogs.instance.trace(
+          'haptics.impact',
+          _captureHaptics.captureImpact,
+        ),
         _processCapturedMedia(source, snapshot, 'photo'),
       ]);
     } on Object catch (error, stack) {
@@ -781,7 +779,9 @@ class _CameraScreenState extends State<CameraScreen> {
           _cameraCoordinator.state == CameraSessionState.recording);
 
   Future<void> _restoreAutoFocus() async {
-    if (!_canFocus || _cameraCoordinator.focusMode == FocusMode.auto) {
+    if (!_canFocus ||
+        (_cameraCoordinator.focusMode == FocusMode.auto &&
+            _cameraCoordinator.focusPoint == null)) {
       return;
     }
     setState(() => _focusBusy = true);
@@ -800,38 +800,21 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
-  Future<void> _focusAt(
-    TapUpDetails details,
-    Size previewSize,
-    double frameTop,
-    double frameBottom,
-    CameraController controller,
-  ) async {
+  Future<void> _focusAt(TapUpDetails details, Rect frame) async {
     if (!_canFocus) {
       return;
     }
     final Offset tap = details.localPosition;
-    if (tap.dy < frameTop || tap.dy > frameBottom) {
+    if (!(Offset.zero & frame.size).contains(tap)) {
       return;
     }
-    final double aspectRatio = previewSize.width > previewSize.height
-        ? controller.value.aspectRatio
-        : 1 / controller.value.aspectRatio;
-    final double imageWidth = math.max(
-      previewSize.width,
-      previewSize.height * aspectRatio,
-    );
-    final double imageHeight = imageWidth / aspectRatio;
-    final Offset point = Offset(
-      (tap.dx + (imageWidth - previewSize.width) / 2) / imageWidth,
-      (tap.dy + (imageHeight - previewSize.height) / 2) / imageHeight,
-    );
+    final Offset point = Offset(tap.dx / frame.width, tap.dy / frame.height);
     setState(() => _focusBusy = true);
     try {
       await _cameraCoordinator.setFocusPoint(point);
       if (mounted) {
         setState(() {
-          _focusIndicator = tap;
+          _focusIndicator = tap + frame.topLeft;
           _focusIndicatorGeneration = _cameraCoordinator.generation;
         });
       }
@@ -1340,14 +1323,18 @@ class _CameraScreenState extends State<CameraScreen> {
           children: <Widget>[
             _buildFlashControl(cameraState == CameraSessionState.ready),
             _buildTopAction(
-              tooltip: _cameraCoordinator.focusMode == FocusMode.auto
+              tooltip:
+                  _cameraCoordinator.focusPoint == null &&
+                      _cameraCoordinator.focusMode == FocusMode.auto
                   ? '自动对焦'
                   : '恢复自动对焦',
               icon: _cameraCoordinator.focusMode == FocusMode.auto
                   ? Icons.center_focus_weak
                   : Icons.center_focus_strong,
               onPressed:
-                  _canFocus && _cameraCoordinator.focusMode == FocusMode.locked
+                  _canFocus &&
+                      (_cameraCoordinator.focusMode == FocusMode.locked ||
+                          _cameraCoordinator.focusPoint != null)
                   ? () => unawaited(_restoreAutoFocus())
                   : null,
             ),
@@ -1440,34 +1427,6 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  double _frameAspectRatio(
-    CameraController controller,
-    BoxConstraints constraints,
-  ) => constraints.maxWidth > constraints.maxHeight
-      ? controller.value.aspectRatio
-      : 1 / controller.value.aspectRatio;
-
-  Widget _buildCameraPreview(CameraController controller) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final double frameAspectRatio = _frameAspectRatio(
-          controller,
-          constraints,
-        );
-        return ClipRect(
-          child: FittedBox(
-            fit: BoxFit.cover,
-            child: SizedBox(
-              width: constraints.maxWidth,
-              height: constraints.maxWidth / frameAspectRatio,
-              child: CameraPreview(controller),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Widget? _buildWatermarkPreview(CameraSessionState cameraState) {
     final String? locationText = _locationText;
     if (locationText == null) {
@@ -1546,39 +1505,34 @@ class _CameraScreenState extends State<CameraScreen> {
       backgroundColor: AppPalette.background,
       body: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
-          final double panelBelowFrame = 176 + safePadding.bottom;
-          final double frameHeight = math.min(
-            constraints.maxWidth * 4 / 3,
-            constraints.maxHeight - panelBelowFrame - safePadding.top - 104,
-          );
-          final double frameTop =
-              constraints.maxHeight - panelBelowFrame - frameHeight;
-          final double frameBottom = frameTop + frameHeight;
           final bool previewReady =
               controller != null && controller.value.isInitialized;
+          final Rect frame = viewfinderRect(
+            constraints.biggest,
+            safePadding,
+            previewReady ? 1 / controller.value.aspectRatio : 3 / 4,
+          );
+          final double frameTop = frame.top;
+          final double frameBottom = frame.bottom;
 
           return Stack(
             fit: StackFit.expand,
             children: <Widget>[
               if (previewReady)
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onScaleStart: _handleZoomGestureStart,
-                  onScaleUpdate: _handleZoomGestureUpdate,
-                  onScaleEnd: _handleZoomGestureEnd,
-                  onTapUp: (TapUpDetails details) => unawaited(
-                    _focusAt(
-                      details,
-                      constraints.biggest,
-                      frameTop,
-                      frameBottom,
-                      controller,
-                    ),
+                Positioned.fromRect(
+                  rect: frame,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onScaleStart: _handleZoomGestureStart,
+                    onScaleUpdate: _handleZoomGestureUpdate,
+                    onScaleEnd: _handleZoomGestureEnd,
+                    onTapUp: (TapUpDetails details) =>
+                        unawaited(_focusAt(details, frame)),
+                    child: ClipRect(child: CameraPreview(controller)),
                   ),
-                  child: _buildCameraPreview(controller),
                 ),
               if (_focusIndicator case final Offset point)
-                if (_cameraCoordinator.focusMode == FocusMode.locked &&
+                if (_cameraCoordinator.focusPoint != null &&
                     _focusIndicatorGeneration == _cameraCoordinator.generation)
                   Positioned(
                     left: point.dx - 22,
@@ -1615,9 +1569,9 @@ class _CameraScreenState extends State<CameraScreen> {
               if (previewReady && _locationText != null)
                 Positioned(
                   top: frameTop,
-                  left: 0,
-                  right: 0,
-                  height: frameHeight,
+                  left: frame.left,
+                  width: frame.width,
+                  height: frame.height,
                   child: IgnorePointer(
                     child: _buildWatermarkPreview(cameraState),
                   ),

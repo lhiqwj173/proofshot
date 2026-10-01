@@ -9,6 +9,34 @@ import XCTest
 
 /// Includes test cases related to resolution presets setting operations for Camera class.
 final class CameraSessionPresetsTests: XCTestCase {
+  func testMaxWithoutAudioUsesPhotoPreset() throws {
+    let videoSession = MockCaptureSession()
+    let presetSet = expectation(description: "静态照片选择照片管线")
+    videoSession.setSessionPresetStub = { preset in
+      XCTAssertEqual(preset, .photo)
+      presetSet.fulfill()
+    }
+    let configuration = CameraTestUtils.createTestCameraConfiguration()
+    configuration.videoCaptureSession = videoSession
+    configuration.mediaSettings = CameraTestUtils.createDefaultMediaSettings(
+      resolutionPreset: .max)
+    configuration.mediaSettings.enableAudio = false
+    let camera = try DefaultCamera(configuration: configuration)
+    XCTAssertEqual(camera.capturePhotoOutput.maxPhotoQualityPrioritization, .quality)
+    waitForExpectations(timeout: 5, handler: nil)
+  }
+
+  func testMaxWithoutAudioRejectsUnsupportedPhotoPreset() {
+    let videoSession = MockCaptureSession()
+    videoSession.canSetSessionPresetStub = { $0 != .photo }
+    let configuration = CameraTestUtils.createTestCameraConfiguration()
+    configuration.videoCaptureSession = videoSession
+    configuration.mediaSettings = CameraTestUtils.createDefaultMediaSettings(
+      resolutionPreset: .max)
+    configuration.mediaSettings.enableAudio = false
+    XCTAssertThrowsError(try DefaultCamera(configuration: configuration))
+  }
+
   func testResolutionPresetWithBestFormat_mustUpdateCaptureSessionPreset() {
     let expectedPreset = AVCaptureSession.Preset.inputPriority
     let presetExpectation = expectation(description: "Expected preset set")

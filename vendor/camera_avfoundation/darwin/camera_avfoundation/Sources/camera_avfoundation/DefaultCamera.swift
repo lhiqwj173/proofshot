@@ -226,7 +226,7 @@ final class DefaultCamera: NSObject, Camera {
 
     videoCaptureSession.addOutput(capturePhotoOutput.avOutput)
     // Configure before the session starts: changing this while running rebuilds the pipeline.
-    capturePhotoOutput.maxPhotoQualityPrioritization = .speed
+    capturePhotoOutput.maxPhotoQualityPrioritization = .quality
 
     motionManager.startAccelerometerUpdates()
 
@@ -299,6 +299,17 @@ final class DefaultCamera: NSObject, Camera {
   ) throws {
     switch resolutionPreset {
     case .max:
+      // 本应用静态照片使用 max + 无音频，选择照片管线以统一预览与成像视野。
+      if !mediaSettings.enableAudio {
+        guard videoCaptureSession.canSetSessionPreset(.photo) else {
+          throw PigeonError(
+            code: "photo_preset_unavailable",
+            message: "当前相机不支持照片采集配置。",
+            details: nil)
+        }
+        videoCaptureSession.sessionPreset = .photo
+        break
+      }
       if let bestFormat = highestResolutionFormat(forCaptureDevice: captureDevice) {
         videoCaptureSession.sessionPreset = .inputPriority
         do {
@@ -806,7 +817,8 @@ final class DefaultCamera: NSObject, Camera {
       settings.flashMode = getAVCaptureFlashMode(for: flashMode)
     }
 
-    settings.photoQualityPrioritization = .speed
+    // 静态照片优先画质；录像抓拍使用平衡模式，避免长时间占用采集管线。
+    settings.photoQualityPrioritization = isRecording ? .balanced : .quality
 
     if #available(iOS 18.0, *) {
       guard capturePhotoOutput.isShutterSoundSuppressionSupported else {
