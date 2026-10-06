@@ -1663,10 +1663,14 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     dateStack.layoutMargins = UIEdgeInsets(top: 5, left: 12, bottom: 5, right: 12)
     let titleGlass = glassGroup(dateStack, radius: 24)
     header.addSubview(titleGlass)
+    let galleryButton = UIButton(type: .system)
+    configureButton(galleryButton, symbol: "photo.on.rectangle", label: "相册平铺", action: #selector(backToGallery))
     configureButton(moreButton, symbol: "ellipsis", label: "更多操作", action: nil)
     moreButton.showsMenuAsPrimaryAction = true
-    let moreGlass = glassGroup(moreButton, radius: 24)
-    header.addSubview(moreGlass)
+    let galleryActions = UIStackView(arrangedSubviews: [galleryButton, moreButton])
+    galleryActions.distribution = .fillEqually
+    let galleryActionsGlass = glassGroup(galleryActions, radius: 24)
+    header.addSubview(galleryActionsGlass)
 
     filmstrip.backgroundColor = .clear
     filmstrip.showsHorizontalScrollIndicator = false
@@ -1697,11 +1701,11 @@ private final class WatermarkMediaPagerViewController: UIViewController,
       backGlass.leadingAnchor.constraint(equalTo: header.leadingAnchor),
       backGlass.topAnchor.constraint(equalTo: header.topAnchor),
       backGlass.widthAnchor.constraint(equalToConstant: 48),
-      moreGlass.trailingAnchor.constraint(equalTo: header.trailingAnchor),
-      moreGlass.topAnchor.constraint(equalTo: header.topAnchor),
-      moreGlass.widthAnchor.constraint(equalToConstant: 48),
+      galleryActionsGlass.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+      galleryActionsGlass.topAnchor.constraint(equalTo: header.topAnchor),
+      galleryActionsGlass.widthAnchor.constraint(equalToConstant: 96),
       titleGlass.leadingAnchor.constraint(equalTo: backGlass.trailingAnchor, constant: 16),
-      titleGlass.trailingAnchor.constraint(equalTo: moreGlass.leadingAnchor, constant: -16),
+      titleGlass.trailingAnchor.constraint(equalTo: galleryActionsGlass.leadingAnchor, constant: -16),
       titleGlass.topAnchor.constraint(equalTo: header.topAnchor),
       titleGlass.heightAnchor.constraint(equalToConstant: 48),
       footer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 28),
@@ -1724,7 +1728,13 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     ])
   }
 
-  @objc private func backToGallery() { navigationController?.popViewController(animated: true) }
+  @objc private func backToGallery() {
+    guard !pageTransitionInProgress, !sharing, presentedViewController == nil else { return }
+    guard let navigationController else {
+      preconditionFailure("The preview must belong to the gallery navigation controller.")
+    }
+    navigationController.popViewController(animated: true)
+  }
 
   @objc private func closeGallery() { onCloseGallery() }
 
