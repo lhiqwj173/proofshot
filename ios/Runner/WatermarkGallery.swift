@@ -1195,7 +1195,8 @@ private final class WatermarkGalleryViewController: UIViewController,
     let detail = WatermarkMediaPagerViewController(
       journal: journal,
       entries: entries,
-      initialIndex: initialIndex
+      initialIndex: initialIndex,
+      onCloseGallery: { [weak self] in self?.closeGallery() }
     ) { [weak self] in
       self?.reloadFromIndex()
     }
@@ -1212,7 +1213,10 @@ private final class WatermarkGalleryViewController: UIViewController,
   }
 
   @objc private func closeGallery() {
-    dismiss(animated: true, completion: onClose)
+    guard let navigationController else {
+      preconditionFailure("The gallery must belong to its presented navigation controller.")
+    }
+    navigationController.dismiss(animated: true, completion: onClose)
   }
 
   private func updateNavigationActions() {
@@ -1483,6 +1487,7 @@ private final class WatermarkMediaPagerViewController: UIViewController,
 {
   private let journal: WatermarkMediaJournal
   private let onChange: () -> Void
+  private let onCloseGallery: () -> Void
   private let pageController: UIPageViewController
   private var entries: [WatermarkGalleryEntry]
   private var currentIndex: Int
@@ -1505,12 +1510,14 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     journal: WatermarkMediaJournal,
     entries: [WatermarkGalleryEntry],
     initialIndex: Int,
+    onCloseGallery: @escaping () -> Void,
     onChange: @escaping () -> Void
   ) {
     precondition(!entries.isEmpty && entries.indices.contains(initialIndex))
     self.journal = journal
     self.entries = entries
     self.currentIndex = initialIndex
+    self.onCloseGallery = onCloseGallery
     let layout = UICollectionViewFlowLayout()
     layout.scrollDirection = .horizontal
     layout.minimumLineSpacing = 3
@@ -1636,7 +1643,7 @@ private final class WatermarkMediaPagerViewController: UIViewController,
     view.addSubview(header)
     view.addSubview(footer)
     let back = UIButton(type: .system)
-    configureButton(back, symbol: "chevron.left", label: "返回图库", action: #selector(backToGallery))
+    configureButton(back, symbol: "chevron.left", label: "返回拍摄界面", action: #selector(closeGallery))
     let backGlass = glassGroup(back, radius: 24)
     header.addSubview(backGlass)
 
@@ -1719,6 +1726,8 @@ private final class WatermarkMediaPagerViewController: UIViewController,
 
   @objc private func backToGallery() { navigationController?.popViewController(animated: true) }
 
+  @objc private func closeGallery() { onCloseGallery() }
+
   func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
     guard gestureRecognizer === dismissGesture else { return true }
     guard !pageTransitionInProgress, !sharing, presentedViewController == nil,
@@ -1750,10 +1759,7 @@ private final class WatermarkMediaPagerViewController: UIViewController,
           self.header.alpha = 0
           self.footer.alpha = 0
         }) { _ in
-          guard let navigationController = self.navigationController else {
-            preconditionFailure("The preview lost its navigation controller while returning to the gallery.")
-          }
-          navigationController.popViewController(animated: false)
+          self.closeGallery()
         }
       } else {
         restoreAfterDismissPan()

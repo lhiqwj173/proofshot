@@ -1381,6 +1381,7 @@ class _CameraScreenState extends State<CameraScreen> {
               icon: Icons.more_horiz_rounded,
               onPressed: _locationLoading ? null : _openSettings,
             ),
+            _buildGalleryControl(cameraState),
           ],
         ),
       ],
@@ -1508,12 +1509,7 @@ class _CameraScreenState extends State<CameraScreen> {
           else
             Row(
               children: <Widget>[
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: _buildGalleryControl(cameraState),
-                  ),
-                ),
+                const Expanded(child: SizedBox.shrink()),
                 _buildCaptureButton(cameraState),
                 Expanded(
                   child: Align(
