@@ -784,7 +784,9 @@ final class WatermarkGalleryBridge {
       }
       let navigationController = UINavigationController(rootViewController: gallery)
       navigationController.overrideUserInterfaceStyle = .dark
-      navigationController.modalPresentationStyle = .fullScreen
+      // 保留底层 Flutter 取景视图，避免预览页触发相机释放与重新初始化。
+      // 真正进入后台时仍由 CameraCoordinator 的应用生命周期处理释放。
+      navigationController.modalPresentationStyle = .overFullScreen
       // 在展示前准备最新作品，避免先闪现图库网格。
       gallery.loadViewIfNeeded()
       presenter.present(navigationController, animated: true)
