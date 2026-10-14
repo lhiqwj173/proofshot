@@ -16,6 +16,8 @@ jobs:
         shell: bash
     env:
       COCOAPODS_DISABLE_STATS: 'true'
+      # iOS 26 API 需要对应 SDK；macos-15 默认仍选择 Xcode 16.4。
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
@@ -32,6 +34,7 @@ jobs:
       - name: 输出构建工具版本
         run: |
           set -euo pipefail
+          test -d "$DEVELOPER_DIR"
           flutter --version
           xcodebuild -version
           pod --version
