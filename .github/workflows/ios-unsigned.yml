@@ -1,0 +1,98 @@
+name: Proofshot unsigned IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 检查并构建 unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      COCOAPODS_DISABLE_STATS: 'true'
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.1'
+          cache: true
+
+      - name: 输出构建工具版本
+        run: |
+          set -euo pipefail
+          flutter --version
+          xcodebuild -version
+          pod --version
+
+      - name: 安装锁定的 Dart 依赖
+        run: flutter pub get --enforce-lockfile
+
+      - name: 静态分析与 Flutter 测试
+        run: |
+          set -euo pipefail
+          flutter analyze
+          flutter test --no-pub -j 1
+
+      - name: 构建无签名真机应用
+        run: flutter build ios --no-pub --release --no-codesign
+
+      - name: 打包 unsigned IPA
+        run: |
+          set -euo pipefail
+          app_path="$GITHUB_WORKSPACE/build/ios/iphoneos/Runner.app"
+          ipa_path="$GITHUB_WORKSPACE/build/ios/ipa/proofshot-unsigned.ipa"
+          package_dir="$(mktemp -d)"
+          trap 'rm -rf "$package_dir"' EXIT
+          test -d "$app_path"
+          mkdir -p "$package_dir/Payload"
+          cp -R "$app_path" "$package_dir/Payload/Runner.app"
+          mkdir -p "$(dirname "$ipa_path")"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$package_dir/Payload" "$ipa_path"
+          test -s "$ipa_path"
+
+      - name: 解包验收 IPA 内容
+        run: |
+          set -euo pipefail
+          verify_dir="$(mktemp -d)"
+          trap 'rm -rf "$verify_dir"' EXIT
+          /usr/bin/ditto -x -k build/ios/ipa/proofshot-unsigned.ipa "$verify_dir"
+          app_dir="$verify_dir/Payload/Runner.app"
+          test -d "$app_dir"
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_dir/Info.plist")"
+          test "$bundle_id" = 'com.proofshot.proofshot'
+          executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_dir/Info.plist")"
+          test -s "$app_dir/$executable"
+          test -s "$app_dir/Frameworks/App.framework/App"
+          test -s "$app_dir/Frameworks/Flutter.framework/Flutter"
+          echo "IPA verified: bundle=$bundle_id"
+
+      - name: 上传 unsigned IPA
+        uses: actions/upload-artifact@v7
+        with:
+          name: proofshot-unsigned
+          path: build/ios/ipa/proofshot-unsigned.ipa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: 保留 Xcode 日志
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: proofshot-xcode-logs
+          path: /tmp/xcodebuild_logs/*.log
+          # 编译开始前失败时尚无 Xcode 日志，失败原因仍在步骤日志中。
+          if-no-files-found: ignore
+          retention-days: 7
