@@ -592,10 +592,10 @@ final class WatermarkBridge {
       else {
         throw WatermarkBridgeError.invalidVideoSource("The source video orientation is invalid.")
       }
-      let renderSize = CGSize(
-        width: ceil(orientedBounds.width),
-        height: ceil(orientedBounds.height)
-      )
+      // 与 Flutter 取景一致：居中裁成竖屏 3:4，保持原始像素密度。
+      // 以 6×8 为单位，确保 H.264 的宽高为偶数且比例严格为 3:4。
+      let cropUnit = floor(min(orientedBounds.width / 6, orientedBounds.height / 8))
+      let renderSize = CGSize(width: cropUnit * 6, height: cropUnit * 8)
       guard min(renderSize.width, renderSize.height) >= 1080 else {
         throw WatermarkBridgeError.resolutionTooLow(
           width: Int(renderSize.width),
@@ -605,7 +605,9 @@ final class WatermarkBridge {
 
       var normalizedTransform = sourceTransform
       normalizedTransform.tx -= orientedBounds.minX
+        + (orientedBounds.width - renderSize.width) / 2
       normalizedTransform.ty -= orientedBounds.minY
+        + (orientedBounds.height - renderSize.height) / 2
       let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
       layerInstruction.setTransform(normalizedTransform, at: .zero)
       let instruction = AVMutableVideoCompositionInstruction()
@@ -683,7 +685,8 @@ final class WatermarkBridge {
           do {
             try verifyRenderedVideo(
               outputURL,
-              expectedDuration: CMTimeGetSeconds(asset.duration)
+              expectedDuration: CMTimeGetSeconds(asset.duration),
+              expectedSize: renderSize
             )
             completion(.success(outputURL))
           } catch {
@@ -724,7 +727,8 @@ final class WatermarkBridge {
 
   private static func verifyRenderedVideo(
     _ outputURL: URL,
-    expectedDuration: Double
+    expectedDuration: Double,
+    expectedSize: CGSize
   ) throws {
     let values = try outputURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
     guard values.isRegularFile == true, (values.fileSize ?? 0) > 0 else {
@@ -745,6 +749,12 @@ final class WatermarkBridge {
     let outputBounds = CGRect(origin: .zero, size: videoTrack.naturalSize)
       .applying(videoTrack.preferredTransform)
       .standardized
+    guard abs(outputBounds.width - expectedSize.width) < 1,
+          abs(outputBounds.height - expectedSize.height) < 1 else {
+      throw WatermarkBridgeError.invalidRenderedVideo(
+        "The exported MP4 dimensions do not match the 3:4 viewfinder."
+      )
+    }
     guard outputBounds.width.isFinite, outputBounds.height.isFinite,
           min(outputBounds.width, outputBounds.height) >= 1080,
           videoTrack.nominalFrameRate >= 29.9

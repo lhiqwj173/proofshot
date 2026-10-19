@@ -2,6 +2,37 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
+/// 拍照与录像共用的竖屏成片比例。
+const double captureAspectRatio = 3 / 4;
+
+/// 将居中裁切后的取景坐标映射回完整相机预览的归一化坐标。
+Offset viewfinderFocusPoint(Offset tap, Size frame, double sourceAspectRatio) {
+  if (!sourceAspectRatio.isFinite ||
+      sourceAspectRatio <= 0 ||
+      !frame.width.isFinite ||
+      frame.width <= 0 ||
+      !frame.height.isFinite ||
+      frame.height <= 0 ||
+      !tap.dx.isFinite ||
+      !tap.dy.isFinite ||
+      tap.dx < 0 ||
+      tap.dx > frame.width ||
+      tap.dy < 0 ||
+      tap.dy > frame.height) {
+    throw ArgumentError('取景尺寸、原始比例或对焦坐标无效。');
+  }
+  final double frameAspectRatio = frame.width / frame.height;
+  final double visibleWidth = math.min(1, frameAspectRatio / sourceAspectRatio);
+  final double visibleHeight = math.min(
+    1,
+    sourceAspectRatio / frameAspectRatio,
+  );
+  return Offset(
+    0.5 + (tap.dx / frame.width - 0.5) * visibleWidth,
+    0.5 + (tap.dy / frame.height - 0.5) * visibleHeight,
+  );
+}
+
 /// 为锁定竖屏的相机完整保留取景比例，控制区不参与成像。
 Rect viewfinderRect(Size viewport, EdgeInsets safePadding, double aspectRatio) {
   if (!aspectRatio.isFinite || aspectRatio <= 0) {

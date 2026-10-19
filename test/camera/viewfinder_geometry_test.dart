@@ -27,15 +27,67 @@ void main() {
     expect(frame.top, 124);
   });
 
-  test('录像的 16:9 取景保留完整画面', () {
+  test('录像与拍照共用 3:4 取景区域，切换模式不收窄', () {
     final Rect frame = viewfinderRect(
       const Size(390, 844),
       const EdgeInsets.only(top: 47, bottom: 34),
-      9 / 16,
+      captureAspectRatio,
     );
-    expect(frame.width / frame.height, closeTo(9 / 16, 1e-10));
+    expect(frame.width / frame.height, closeTo(3 / 4, 1e-10));
+    expect(frame.width, 362.25);
     expect(frame.top, 151);
     expect(frame.bottom, 634);
+  });
+
+  test('9:16 视频裁切后，对焦映射保留中央 75% 的高度', () {
+    const Size frame = Size(300, 400);
+    expect(
+      viewfinderFocusPoint(Offset.zero, frame, 9 / 16),
+      const Offset(0, 0.125),
+    );
+    expect(
+      viewfinderFocusPoint(const Offset(300, 400), frame, 9 / 16),
+      const Offset(1, 0.875),
+    );
+    expect(
+      viewfinderFocusPoint(const Offset(150, 200), frame, 9 / 16),
+      const Offset(0.5, 0.5),
+    );
+  });
+
+  test('照片比例不裁切，对焦坐标保持不变', () {
+    expect(
+      viewfinderFocusPoint(const Offset(75, 300), const Size(300, 400), 3 / 4),
+      const Offset(0.25, 0.75),
+    );
+  });
+
+  test('宽画面居中裁切时，对焦映射到中央区域', () {
+    expect(
+      viewfinderFocusPoint(Offset.zero, const Size(300, 400), 3 / 2),
+      const Offset(0.25, 0),
+    );
+  });
+
+  test('无效对焦输入直接报错', () {
+    for (final double ratio in <double>[0, -1, double.nan, double.infinity]) {
+      expect(
+        () => viewfinderFocusPoint(Offset.zero, const Size(300, 400), ratio),
+        throwsArgumentError,
+      );
+    }
+    expect(
+      () => viewfinderFocusPoint(
+        const Offset(-1, 0),
+        const Size(300, 400),
+        3 / 4,
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => viewfinderFocusPoint(Offset.zero, Size.zero, 3 / 4),
+      throwsArgumentError,
+    );
   });
 
   test('无效比例与不足的显示空间直接报错', () {

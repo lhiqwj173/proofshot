@@ -837,7 +837,15 @@ class _CameraScreenState extends State<CameraScreen> {
     if (!(Offset.zero & frame.size).contains(tap)) {
       return;
     }
-    final Offset point = Offset(tap.dx / frame.width, tap.dy / frame.height);
+    final CameraController? controller = _cameraCoordinator.controller;
+    if (controller == null || !controller.value.isInitialized) {
+      throw StateError('点击对焦需要已初始化的相机。');
+    }
+    final Offset point = viewfinderFocusPoint(
+      tap,
+      frame.size,
+      1 / controller.value.aspectRatio,
+    );
     setState(() => _focusBusy = true);
     try {
       await _cameraCoordinator.setFocusPoint(point);
@@ -1547,7 +1555,7 @@ class _CameraScreenState extends State<CameraScreen> {
           final Rect frame = viewfinderRect(
             constraints.biggest,
             safePadding,
-            previewReady ? 1 / controller.value.aspectRatio : 3 / 4,
+            captureAspectRatio,
           );
           final double frameTop = frame.top;
           final double frameBottom = frame.bottom;
@@ -1565,7 +1573,16 @@ class _CameraScreenState extends State<CameraScreen> {
                     onScaleEnd: _handleZoomGestureEnd,
                     onTapUp: (TapUpDetails details) =>
                         unawaited(_focusAt(details, frame)),
-                    child: ClipRect(child: CameraPreview(controller)),
+                    child: ClipRect(
+                      child: FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: 1 / controller.value.aspectRatio,
+                          height: 1,
+                          child: CameraPreview(controller),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               if (_focusIndicator case final Offset point)
