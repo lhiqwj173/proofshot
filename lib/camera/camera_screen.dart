@@ -74,6 +74,8 @@ class _CameraScreenState extends State<CameraScreen> {
   RecentCaptureThumbnail? _recentThumbnail;
   Uint8List? _recentThumbnailBytes;
   String? _mediaMessage;
+  Timer? _captureSuccessTimer;
+  String? _captureSuccessLabel;
   CameraSessionState? _lastLoggedCameraState;
 
   @override
@@ -103,6 +105,7 @@ class _CameraScreenState extends State<CameraScreen> {
   void dispose() {
     _isShuttingDown = true;
     _recordingTicker?.cancel();
+    _captureSuccessTimer?.cancel();
     _recordingClock.stop();
     widget.settings.removeListener(_handleSettingsChanged);
     _cameraCoordinator.removeListener(_handleCameraStateChanged);
@@ -342,8 +345,12 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
     if (_mediaMessage != null && mounted) {
-      setState(() => _mediaMessage = null);
+      setState(() {
+        _mediaMessage = null;
+        _captureSuccessLabel = null;
+      });
     }
+    _captureSuccessTimer?.cancel();
     setState(() {
       _photoCaptureBusy = true;
       _pendingPhotoCount++;
@@ -639,6 +646,7 @@ class _CameraScreenState extends State<CameraScreen> {
         context: <String, Object?>{'kind': kind},
       );
       if (mounted) {
+        _showCaptureSuccess(kind);
         unawaited(_refreshPendingMedia());
       }
     } on Object catch (error, stack) {
@@ -658,6 +666,16 @@ class _CameraScreenState extends State<CameraScreen> {
         _syncHardwareCapture();
       }
     }
+  }
+
+  void _showCaptureSuccess(String kind) {
+    _captureSuccessTimer?.cancel();
+    setState(() {
+      _captureSuccessLabel = kind == 'photo' ? '照片已保存' : '视频已保存';
+    });
+    _captureSuccessTimer = Timer(const Duration(milliseconds: 1800), () {
+      if (mounted) setState(() => _captureSuccessLabel = null);
+    });
   }
 
   Future<void> _restorePendingMedia() async {
@@ -1632,6 +1650,18 @@ class _CameraScreenState extends State<CameraScreen> {
                     child: _buildWatermarkPreview(cameraState),
                   ),
                 ),
+              if (previewReady && _captureSuccessLabel != null)
+                Positioned(
+                  left: frame.left,
+                  top: frame.top,
+                  width: frame.width,
+                  height: frame.height,
+                  child: IgnorePointer(
+                    child: Center(
+                      child: _buildCaptureSuccess(_captureSuccessLabel!),
+                    ),
+                  ),
+                ),
               if (cameraState == CameraSessionState.recording)
                 Positioned(
                   top: frameTop + 18,
@@ -1684,6 +1714,51 @@ class _CameraScreenState extends State<CameraScreen> {
       ),
     );
   }
+
+  Widget _buildCaptureSuccess(String label) => AnimatedSwitcher(
+    duration: const Duration(milliseconds: 180),
+    transitionBuilder: (Widget child, Animation<double> animation) =>
+        FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(scale: animation, child: child),
+        ),
+    child: Container(
+      key: ValueKey<String>(label),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xD9212422),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 24,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const Icon(
+            Icons.check_circle_rounded,
+            color: Color(0xFF72E0A1),
+            size: 26,
+          ),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _LocationConfirmationDialog extends StatefulWidget {
