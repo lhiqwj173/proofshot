@@ -3,8 +3,41 @@ import AVFoundation
 import UIKit
 import XCTest
 import camera_avfoundation
+@testable import Runner
 
 class RunnerTests: XCTestCase {
+
+  func testRealtimeFrameTimingAcceptsVariableFrameRate() throws {
+    try WatermarkBridge.verifyVideoFrameTiming(
+      nominalFrameRate: 29.6, minFrameDuration: CMTime(value: 1, timescale: 30),
+      requiresConstantFrameRate: false)
+    try WatermarkBridge.verifyVideoFrameTiming(
+      nominalFrameRate: 28, minFrameDuration: CMTime(value: 1, timescale: 30),
+      requiresConstantFrameRate: false)
+  }
+
+  func testConstantFrameRateExportStillRequires30fps() throws {
+    XCTAssertThrowsError(try WatermarkBridge.verifyVideoFrameTiming(
+      nominalFrameRate: 29.6, minFrameDuration: CMTime(value: 1, timescale: 30),
+      requiresConstantFrameRate: true))
+    try WatermarkBridge.verifyVideoFrameTiming(
+      nominalFrameRate: 30, minFrameDuration: CMTime(value: 1, timescale: 30),
+      requiresConstantFrameRate: true)
+  }
+
+  func testRealtimeFrameTimingRejectsInvalidTracks() {
+    let rates: [Float] = [0, -1, .nan, .infinity]
+    for rate in rates {
+      XCTAssertThrowsError(try WatermarkBridge.verifyVideoFrameTiming(
+        nominalFrameRate: rate, minFrameDuration: CMTime(value: 1, timescale: 30),
+        requiresConstantFrameRate: false))
+    }
+    for duration in [CMTime.zero, .invalid, .indefinite, CMTime(value: -1, timescale: 30)] {
+      XCTAssertThrowsError(try WatermarkBridge.verifyVideoFrameTiming(
+        nominalFrameRate: 30, minFrameDuration: duration,
+        requiresConstantFrameRate: false))
+    }
+  }
 
   func testMP4WatermarkReceiptSurvivesWriting() throws {
     let url = FileManager.default.temporaryDirectory

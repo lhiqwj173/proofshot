@@ -728,7 +728,8 @@ final class WatermarkBridge {
             try verifyRenderedVideo(
               outputURL,
               expectedDuration: CMTimeGetSeconds(asset.duration),
-              expectedSize: renderSize
+              expectedSize: renderSize,
+              requiresConstantFrameRate: true
             )
             completion(.success(outputURL))
           } catch {
@@ -770,7 +771,8 @@ final class WatermarkBridge {
       throw WatermarkBridgeError.invalidRenderedVideo("实时录像水印标识与拍摄快照不一致。原文件已保留。")
     }
     try verifyRenderedVideo(asset.url, expectedDuration: CMTimeGetSeconds(asset.duration),
-                            expectedSize: ProofshotRealtimeWatermark.size)
+                            expectedSize: ProofshotRealtimeWatermark.size,
+                            requiresConstantFrameRate: false)
   }
 
   private static func makeWatermarkOverlay(
@@ -802,7 +804,8 @@ final class WatermarkBridge {
   private static func verifyRenderedVideo(
     _ outputURL: URL,
     expectedDuration: Double,
-    expectedSize: CGSize
+    expectedSize: CGSize,
+    requiresConstantFrameRate: Bool
   ) throws {
     let values = try outputURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
     guard values.isRegularFile == true, (values.fileSize ?? 0) > 0 else {
@@ -830,13 +833,17 @@ final class WatermarkBridge {
       )
     }
     guard outputBounds.width.isFinite, outputBounds.height.isFinite,
-          min(outputBounds.width, outputBounds.height) >= 1080,
-          videoTrack.nominalFrameRate >= 29.9
+          min(outputBounds.width, outputBounds.height) >= 1080
     else {
       throw WatermarkBridgeError.invalidRenderedVideo(
-        "The exported MP4 is below 1080p or 30 frames per second."
+        "视频分辨率不合格：\(outputBounds.width)×\(outputBounds.height)，短边要求至少 1080。"
       )
     }
+    try verifyVideoFrameTiming(
+      nominalFrameRate: videoTrack.nominalFrameRate,
+      minFrameDuration: videoTrack.minFrameDuration,
+      requiresConstantFrameRate: requiresConstantFrameRate
+    )
 
     let videoCodecs: [FourCharCode] = videoTrack.formatDescriptions.map { value in
       let description: CMFormatDescription = value as! CMFormatDescription
@@ -863,6 +870,28 @@ final class WatermarkBridge {
     else {
       throw WatermarkBridgeError.invalidRenderedVideo(
         "The exported MP4 duration does not match the recorded source."
+      )
+    }
+  }
+
+  static func verifyVideoFrameTiming(
+    nominalFrameRate: Float,
+    minFrameDuration: CMTime,
+    requiresConstantFrameRate: Bool
+  ) throws {
+    let seconds = CMTimeGetSeconds(minFrameDuration)
+    guard nominalFrameRate.isFinite, nominalFrameRate > 0,
+          CMTIME_IS_NUMERIC(minFrameDuration), seconds.isFinite, seconds > 0 else {
+      throw WatermarkBridgeError.invalidRenderedVideo(
+        "视频帧时序无效：轨道帧率 \(nominalFrameRate)，最短帧时长 \(seconds) 秒。"
+      )
+    }
+    // 实时采集按原始 PTS 写入，短片、启动抖动及背压都可能使轨道帧率低于 29.9。
+    // 不补帧、不重写时间戳；30fps 编码提示并不保证固定帧间隔。
+    // 只有显式以 frameDuration=1/30 重新合成的旧视频才要求固定帧率。
+    if requiresConstantFrameRate && nominalFrameRate < 29.9 {
+      throw WatermarkBridgeError.invalidRenderedVideo(
+        "固定帧率导出未达到 30fps：轨道帧率 \(nominalFrameRate)，最短帧时长 \(seconds) 秒。"
       )
     }
   }
