@@ -310,20 +310,16 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _updateRecentThumbnail(String sourcePath, String kind) async {
     final int generation = ++_thumbnailGeneration;
-    try {
-      final RecentCaptureThumbnail thumbnail = await _watermarkBridge
-          .updateRecentThumbnail(sourcePath: sourcePath, kind: kind);
-      final Uint8List bytes = await File(thumbnail.path).readAsBytes();
-      if (!mounted || generation != _thumbnailGeneration) {
-        return;
-      }
-      setState(() {
-        _recentThumbnail = thumbnail;
-        _recentThumbnailBytes = bytes;
-      });
-    } on Object catch (error) {
-      _showMediaError(error);
+    final RecentCaptureThumbnail thumbnail = await _watermarkBridge
+        .updateRecentThumbnail(sourcePath: sourcePath, kind: kind);
+    final Uint8List bytes = await File(thumbnail.path).readAsBytes();
+    if (!mounted || generation != _thumbnailGeneration) {
+      return;
     }
+    setState(() {
+      _recentThumbnail = thumbnail;
+      _recentThumbnailBytes = bytes;
+    });
   }
 
   WatermarkSnapshot _snapshotAt(String location, DateTime capturedAt) {
@@ -451,7 +447,6 @@ class _CameraScreenState extends State<CameraScreen> {
       if (snapshot == null) {
         throw StateError('The recording has no frozen watermark snapshot.');
       }
-      await _updateRecentThumbnail(source.path, 'video');
       await _processCapturedMedia(source, snapshot, 'video');
     } on Object catch (error) {
       _showMediaError(error);
@@ -548,7 +543,6 @@ class _CameraScreenState extends State<CameraScreen> {
         );
       }
       _recordingSnapshot = null;
-      await _updateRecentThumbnail(source.path, 'video');
       await _processCapturedMedia(source, snapshot, 'video');
     } on Object catch (error) {
       _showMediaError(error);
@@ -617,7 +611,6 @@ class _CameraScreenState extends State<CameraScreen> {
               ),
         context: <String, Object?>{'kind': kind},
       );
-      await _updateRecentThumbnail(renderedPath, kind);
       await RuntimeLogs.instance.trace(
         'media.mark_rendered',
         () => _galleryBridge.markRendered(
@@ -626,6 +619,8 @@ class _CameraScreenState extends State<CameraScreen> {
         ),
         context: <String, Object?>{'kind': kind},
       );
+      // 先持久化成品路径；缩略图失败后可直接恢复保存，无须再次转码。
+      await _updateRecentThumbnail(renderedPath, kind);
       await RuntimeLogs.instance.trace(
         'media.save_to_photos',
         () => _galleryBridge.saveToPhotos(taskId: taskId),

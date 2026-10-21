@@ -1,6 +1,7 @@
 import AVFoundation
 import AudioToolbox
 import CoreGraphics
+import CoreImage
 import CoreMedia
 import Flutter
 import Foundation
@@ -592,56 +593,52 @@ final class WatermarkBridge {
       else {
         throw WatermarkBridgeError.invalidVideoSource("The source video orientation is invalid.")
       }
-      // 与 Flutter 取景一致：居中裁成竖屏 3:4，保持原始像素密度。
-      // 以 6×8 为单位，确保 H.264 的宽高为偶数且比例严格为 3:4。
+      // 先检查原片裁切后的真实分辨率，禁止放大低清素材伪造 1080p。
+      // 输出固定 1080×1440，避免高分辨率录制把水印合成成本一起放大。
       let cropUnit = floor(min(orientedBounds.width / 6, orientedBounds.height / 8))
-      let renderSize = CGSize(width: cropUnit * 6, height: cropUnit * 8)
-      guard min(renderSize.width, renderSize.height) >= 1080 else {
+      let cropSize = CGSize(width: cropUnit * 6, height: cropUnit * 8)
+      guard min(cropSize.width, cropSize.height) >= 1080 else {
         throw WatermarkBridgeError.resolutionTooLow(
-          width: Int(renderSize.width),
-          height: Int(renderSize.height)
+          width: Int(cropSize.width),
+          height: Int(cropSize.height)
         )
       }
-
-      var normalizedTransform = sourceTransform
-      normalizedTransform.tx -= orientedBounds.minX
-        + (orientedBounds.width - renderSize.width) / 2
-      normalizedTransform.ty -= orientedBounds.minY
-        + (orientedBounds.height - renderSize.height) / 2
-      let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
-      layerInstruction.setTransform(normalizedTransform, at: .zero)
-      let instruction = AVMutableVideoCompositionInstruction()
-      instruction.timeRange = CMTimeRange(start: .zero, duration: asset.duration)
-      instruction.layerInstructions = [layerInstruction]
-
-      let videoComposition = AVMutableVideoComposition()
+      let renderSize = CGSize(width: 1080, height: 1440)
+      let renderBounds = CGRect(origin: .zero, size: renderSize)
+      let scale = renderSize.width / cropSize.width
+      let overlayImage = try makeWatermarkOverlay(request.snapshot, size: renderSize)
+      let overlay = CIImage(cgImage: overlayImage)
+      // 一个导出任务复用一个 GPU context，关闭视频中间帧缓存以控制长视频内存。
+      let context = CIContext(options: [.useSoftwareRenderer: false, .cacheIntermediates: false])
+      // 系统先应用轨道 preferredTransform；此处仅处理居中裁切和缩放。
+      // 不替换此初始化器生成的 instructions，否则 Core Image compositor 无法工作。
+      let videoComposition = AVMutableVideoComposition(asset: asset) { frame in
+        autoreleasepool {
+          let image = frame.sourceImage
+          let extent = image.extent
+          guard extent.width.isFinite, extent.height.isFinite,
+                extent.width >= cropSize.width, extent.height >= cropSize.height else {
+            frame.finish(with: WatermarkBridgeError.invalidVideoSource(
+              "The video compositor supplied an invalid source frame."
+            ))
+            return
+          }
+          let crop = CGRect(
+            x: extent.midX - cropSize.width / 2,
+            y: extent.midY - cropSize.height / 2,
+            width: cropSize.width,
+            height: cropSize.height
+          )
+          let background = image.cropped(to: crop)
+            .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+          let output = overlay.composited(over: background).cropped(to: renderBounds)
+          frame.finish(with: output, context: context)
+        }
+      }
       videoComposition.renderSize = renderSize
       videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
       videoComposition.renderScale = 1
-      videoComposition.instructions = [instruction]
-
-      let overlayImage = try makeWatermarkOverlay(request.snapshot, size: renderSize)
-      let parentLayer = CALayer()
-      parentLayer.frame = CGRect(origin: .zero, size: renderSize)
-      parentLayer.isGeometryFlipped = true
-      parentLayer.masksToBounds = true
-
-      let videoLayer = CALayer()
-      videoLayer.frame = parentLayer.bounds
-      videoLayer.masksToBounds = true
-      parentLayer.addSublayer(videoLayer)
-
-      let watermarkLayer = CALayer()
-      watermarkLayer.frame = parentLayer.bounds
-      watermarkLayer.contents = overlayImage
-      watermarkLayer.contentsGravity = .resize
-      watermarkLayer.contentsScale = 1
-      watermarkLayer.masksToBounds = true
-      parentLayer.addSublayer(watermarkLayer)
-      videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
-        postProcessingAsVideoLayer: videoLayer,
-        in: parentLayer
-      )
 
       guard AVAssetExportSession.allExportPresets().contains(AVAssetExportPreset1920x1080),
             let exportSession = AVAssetExportSession(
@@ -667,7 +664,8 @@ final class WatermarkBridge {
         exportSession.outputURL = outputURL
         exportSession.outputFileType = .mp4
         exportSession.videoComposition = videoComposition
-        exportSession.shouldOptimizeForNetworkUse = true
+        exportSession.shouldOptimizeForNetworkUse = false
+        exportSession.canPerformMultiplePassesOverSourceMediaData = false
         exportSession.exportAsynchronously {
           guard exportSession.status == .completed else {
             if let exportError = exportSession.error {
