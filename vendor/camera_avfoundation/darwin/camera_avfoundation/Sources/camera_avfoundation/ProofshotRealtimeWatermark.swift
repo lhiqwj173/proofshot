@@ -68,13 +68,18 @@ public final class ProofshotRealtimeWatermark {
     pool = createdPool
   }
 
-  func configure(_ writer: AVAssetWriter) {
+  public static func receiptMetadata(token: String) -> AVMetadataItem {
+    precondition(!token.isEmpty, "实时水印标识不能为空。")
     let metadata = AVMutableMetadataItem()
-    metadata.keySpace = .quickTimeMetadata
-    metadata.key = Self.metadataKey as NSString
+    // MP4 writer 不保证保留任意 QuickTime mdta 自定义键，使用可映射的标准描述字段。
+    metadata.identifier = .commonIdentifierDescription
     metadata.value = token as NSString
     metadata.dataType = kCMMetadataBaseDataType_UTF8 as String
-    writer.metadata = [metadata]
+    return metadata
+  }
+
+  func configure(_ writer: AVAssetWriter) {
+    writer.metadata = [Self.receiptMetadata(token: token)]
     writer.shouldOptimizeForNetworkUse = false
   }
 

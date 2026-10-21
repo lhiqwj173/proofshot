@@ -16,6 +16,43 @@ class _RuntimeLogDialogState extends State<RuntimeLogDialog> {
   String? _status;
   bool _busy = false;
 
+  Future<void> _clear() async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('清理运行日志？'),
+        content: const Text('删除 App 内的当前日志、较早日志和导出副本。已分享的文件不受影响。清理后继续记录新日志。'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('清理'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _export = null;
+      _status = null;
+    });
+    try {
+      await RuntimeLogs.instance.clear();
+      if (mounted) setState(() => _status = '历史日志及导出副本已清理，已记录清理操作，后续日志继续自动记录。');
+    } catch (error, stack) {
+      RuntimeLogs.instance.observe(
+        RuntimeLogs.instance.failure('runtime_log.clear', error, stack),
+      );
+      if (mounted) setState(() => _status = '清理失败：$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _generate() async {
     setState(() {
       _busy = true;
@@ -92,6 +129,10 @@ class _RuntimeLogDialogState extends State<RuntimeLogDialog> {
       ],
     ),
     actions: <Widget>[
+      TextButton(
+        onPressed: _busy ? null : () => unawaited(_clear()),
+        child: const Text('清理日志'),
+      ),
       TextButton(
         onPressed: _busy ? null : () => Navigator.pop(context),
         child: const Text('关闭'),

@@ -109,5 +109,41 @@ void main() {
       ),
       throwsStateError,
     );
+
+    final exportDirectory = Directory('${documents.path}/runtime_logs_export');
+    await File('${exportDirectory.path}/runtime.jsonl.tmp')
+        .writeAsString('incomplete', encoding: utf8);
+    final unrelated = File('${exportDirectory.path}/keep.txt');
+    await unrelated.writeAsString('keep', encoding: utf8);
+    final beforeClear = logs.event('before.clear');
+    final clear = logs.clear();
+    final afterClear = logs.event('after.clear');
+    await Future.wait<void>(<Future<void>>[beforeClear, clear, afterClear]);
+    final remaining = (await source.readAsLines(encoding: utf8))
+        .map((line) => jsonDecode(line) as Map<String, dynamic>)
+        .toList();
+    expect(remaining.map((entry) => entry['code']), <String>[
+      'runtime_log.cleared',
+      'after.clear',
+    ]);
+    expect(
+      remaining.last['seq'] as int,
+      greaterThan(remaining.first['seq'] as int),
+    );
+    expect(
+      await File('${support.path}/runtime_logs/runtime.1.jsonl').exists(),
+      isFalse,
+    );
+    expect(await unrelated.readAsString(encoding: utf8), 'keep');
+    for (final name in <String>[
+      'runtime.jsonl',
+      'runtime.1.jsonl',
+      'runtime.jsonl.tmp',
+    ]) {
+      expect(await File('${exportDirectory.path}/$name').exists(), isFalse);
+    }
+    final freshExport = await logs.export();
+    expect(freshExport.records, 2);
+    expect(freshExport.damagedLines, 0);
   });
 }

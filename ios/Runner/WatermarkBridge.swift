@@ -749,11 +749,25 @@ final class WatermarkBridge {
   private static func verifyRealtimeRecording(
     _ asset: AVURLAsset, snapshot: WatermarkSnapshotData
   ) throws {
-    let identifier = AVMetadataIdentifier(rawValue: "mdta/" + ProofshotRealtimeWatermark.metadataKey)
-    let receipts = AVMetadataItem.metadataItems(from: asset.metadata, filteredByIdentifier: identifier)
+    var receipts = AVMetadataItem.metadataItems(
+      from: asset.commonMetadata, filteredByIdentifier: .commonIdentifierDescription
+    )
+    // 兼容已写入旧版 mdta 的文件；按元数据格式读取，不猜测文件是否带水印。
+    if receipts.isEmpty, asset.availableMetadataFormats.contains(.quickTimeMetadata) {
+      let identifier = AVMetadataIdentifier(rawValue: "mdta/" + ProofshotRealtimeWatermark.metadataKey)
+      receipts = AVMetadataItem.metadataItems(
+        from: asset.metadata(forFormat: .quickTimeMetadata), filteredByIdentifier: identifier
+      )
+    }
     let expectedToken = try snapshot.realtimeToken
-    guard receipts.count == 1, receipts[0].stringValue == expectedToken else {
-      throw WatermarkBridgeError.invalidRenderedVideo("实时录像水印标识缺失或与拍摄快照不一致。")
+    guard receipts.count == 1 else {
+      let formats = asset.availableMetadataFormats.map(\.rawValue).joined(separator: ",")
+      throw WatermarkBridgeError.invalidRenderedVideo(
+        "实时录像水印标识数量错误：\(receipts.count)，元数据格式：\(formats)。原文件已保留。"
+      )
+    }
+    guard receipts[0].stringValue == expectedToken else {
+      throw WatermarkBridgeError.invalidRenderedVideo("实时录像水印标识与拍摄快照不一致。原文件已保留。")
     }
     try verifyRenderedVideo(asset.url, expectedDuration: CMTimeGetSeconds(asset.duration),
                             expectedSize: ProofshotRealtimeWatermark.size)

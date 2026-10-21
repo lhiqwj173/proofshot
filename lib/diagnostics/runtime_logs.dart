@@ -273,6 +273,40 @@ class RuntimeLogs {
   String _bounded(String value, int max) =>
       value.length <= max ? value : '${value.substring(0, max)}<truncated>';
 
+  Future<void> clear() {
+    if (!_initialized) throw StateError('RuntimeLogs is not initialized.');
+    return _enqueue(() async {
+      var deletedFiles = 0;
+      // 与写入、轮转、导出共用队列；只删除本组件拥有的固定文件。
+      for (final name in <String>['runtime.jsonl', 'runtime.1.jsonl']) {
+        final source = File('${_sourceDirectory.path}/$name');
+        if (await source.exists()) {
+          await source.delete();
+          deletedFiles++;
+        }
+        for (final suffix in <String>['', '.tmp']) {
+          final exported = File('${_exportDirectory.path}/$name$suffix');
+          if (await exported.exists()) {
+            await exported.delete();
+            deletedFiles++;
+          }
+        }
+      }
+      await _write(<String, Object?>{
+        'type': 'event',
+        'code': 'runtime_log.cleared',
+        'phase': 'success',
+        'duration_us': null,
+        'operation_id': null,
+        'message': null,
+        'stack': null,
+        'context': <String, Object?>{'deleted_files': deletedFiles},
+      });
+      _writeFailures = 0;
+      _lastWriteError = null;
+    });
+  }
+
   Future<RuntimeLogExport> export() => _enqueue(() async {
     await _exportDirectory.create(recursive: true);
     final paths = <String>[];
