@@ -95,6 +95,8 @@ final class DefaultCamera: NSObject, Camera {
   private var audioWriterInput: AssetWriterInput?
   private var assetWriterPixelBufferAdaptor: AssetWriterInputPixelBufferAdaptor?
   private var videoAdaptor: AssetWriterInputPixelBufferAdaptor?
+  private var realtimeWatermark: ProofshotRealtimeWatermark?
+  private var realtimeRecordingError: Error?
 
   /// A dictionary to retain all in-progress SavePhotoDelegates. The key of the dictionary is the
   /// AVCapturePhotoSettings's uniqueID for each photo capture operation, and the value is the
@@ -614,12 +616,14 @@ final class DefaultCamera: NSObject, Camera {
 
   /// Main logic to setup the video recording.
   private func setUpVideoRecording(completion: @escaping (Result<Void, any Error>) -> Void) {
+    realtimeWatermark = ProofshotRealtimeWatermark.takePrepared()
+    realtimeRecordingError = nil
     let videoRecordingPath: String
     do {
       videoRecordingPath = try getTemporaryFilePath(
         withExtension: "mp4",
         subfolder: "videos",
-        prefix: "REC_")
+        prefix: realtimeWatermark == nil ? "REC_" : ProofshotRealtimeWatermark.filePrefix)
       self.videoRecordingPath = videoRecordingPath
     } catch let error as NSError {
       completion(.failure(DefaultCamera.pigeonErrorFromNSError(error)))
@@ -669,6 +673,12 @@ final class DefaultCamera: NSObject, Camera {
     do {
       videoWriter = try assetWriterFactory(URL(fileURLWithPath: path), .mp4)
       self.videoWriter = videoWriter
+      if let realtimeWatermark {
+        guard let nativeWriter = videoWriter as? AVAssetWriter else {
+          throw ProofshotRealtimeWatermark.failure("实时水印必须使用原生 AVAssetWriter。")
+        }
+        realtimeWatermark.configure(nativeWriter)
+      }
     } catch let error as NSError {
       reportErrorMessage(error.description)
       return false
@@ -694,13 +704,39 @@ final class DefaultCamera: NSObject, Camera {
       videoSettings?[AVVideoCompressionPropertiesKey] = compressionProperties
     }
 
+    if realtimeWatermark != nil {
+      guard mediaSettings.enableAudio, videoSettings != nil else {
+        reportErrorMessage("实时水印录像必须具备有效的视频配置和音频输入。")
+        return false
+      }
+      videoSettings?[AVVideoCodecKey] = AVVideoCodecType.h264
+      videoSettings?[AVVideoWidthKey] = 1080
+      videoSettings?[AVVideoHeightKey] = 1440
+      videoSettings?.removeValue(forKey: AVVideoCleanApertureKey)
+      videoSettings?.removeValue(forKey: AVVideoPixelAspectRatioKey)
+      videoSettings?[AVVideoCompressionPropertiesKey] = [
+        AVVideoAverageBitRateKey: Int(mediaSettings.videoBitrate ?? 8_000_000),
+        AVVideoExpectedSourceFrameRateKey: framesPerSecond ?? 30,
+        AVVideoMaxKeyFrameIntervalKey: 30,
+        AVVideoAllowFrameReorderingKey: false,
+        AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+      ]
+    }
+
     let videoWriterInput = mediaSettingsAVWrapper.assetWriterVideoInput(
       withOutputSettings: videoSettings)
     self.videoWriterInput = videoWriterInput
 
-    let sourcePixelBufferAttributes: [String: Any] = [
+    var sourcePixelBufferAttributes: [String: Any] = [
       kCVPixelBufferPixelFormatTypeKey as String: videoFormat
     ]
+    if realtimeWatermark != nil {
+      sourcePixelBufferAttributes[kCVPixelBufferPixelFormatTypeKey as String] = kCVPixelFormatType_32BGRA
+      sourcePixelBufferAttributes[kCVPixelBufferWidthKey as String] = 1080
+      sourcePixelBufferAttributes[kCVPixelBufferHeightKey as String] = 1440
+      sourcePixelBufferAttributes[kCVPixelBufferMetalCompatibilityKey as String] = true
+      sourcePixelBufferAttributes[kCVPixelBufferIOSurfacePropertiesKey as String] = [:]
+    }
 
     videoAdaptor = inputPixelBufferAdaptorFactory(videoWriterInput, sourcePixelBufferAttributes)
 
@@ -766,23 +802,44 @@ final class DefaultCamera: NSObject, Camera {
 
     isRecording = false
 
+    guard let writer = videoWriter, let recordingPath = videoRecordingPath else {
+      completion(.failure(DefaultCamera.pigeonErrorFromNSError(
+        ProofshotRealtimeWatermark.failure("停止录像时编码器或输出路径缺失。"))))
+      return
+    }
+    if realtimeWatermark != nil,
+       isFirstVideoSample || realtimeRecordingError != nil || writer.status != .writing {
+      let error = realtimeRecordingError ?? writer.error
+        ?? ProofshotRealtimeWatermark.failure("实时录像没有成功写入有效的视频帧。")
+      (writer as? AVAssetWriter)?.cancelWriting()
+      realtimeWatermark = nil
+      updateOrientation()
+      completion(.failure(DefaultCamera.pigeonErrorFromNSError(error as NSError)))
+      return
+    }
+    if realtimeWatermark != nil {
+      // 所有 append 都在采集队列完成；停止后只排空编码器，不重新读取整段视频。
+      videoWriterInput?.avInput.markAsFinished()
+      audioWriterInput?.avInput.markAsFinished()
+    }
+
     // When `isRecording` is true `startWriting` was already called so `videoWriter.status`
     // is always either `.writing` or `.failed` and `finishWriting` does not throw exceptions so
     // there is no need to check `videoWriter.status`
-    videoWriter?.finishWriting { [weak self] in
-      guard let strongSelf = self else { return }
-
-      if strongSelf.videoWriter?.status == .completed {
-        strongSelf.updateOrientation()
-        completion(.success(strongSelf.videoRecordingPath!))
-        strongSelf.videoRecordingPath = nil
-      } else {
-        completion(
-          .failure(
-            PigeonError(
-              code: "IOError",
-              message: "AVAssetWriter could not finish writing!",
-              details: nil)))
+    writer.finishWriting { [self] in
+      captureSessionQueue.async { [self] in
+        defer { realtimeWatermark = nil }
+        if let error = realtimeRecordingError {
+          completion(.failure(DefaultCamera.pigeonErrorFromNSError(error as NSError)))
+        } else if writer.status == .completed {
+          updateOrientation()
+          videoRecordingPath = nil
+          completion(.success(recordingPath))
+        } else {
+          completion(.failure(PigeonError(
+            code: "IOError", message: "AVAssetWriter could not finish writing!",
+            details: writer.error?.localizedDescription)))
+        }
       }
     }
   }
@@ -1401,6 +1458,7 @@ final class DefaultCamera: NSObject, Camera {
     if isRecording && !isRecordingPaused && videoCaptureSession.isRunning
       && audioCaptureSession.isRunning
     {
+      guard realtimeRecordingError == nil else { return }
       if videoWriter?.status == .failed, let error = videoWriter?.error {
         reportErrorMessage("\(error)")
         return
@@ -1458,7 +1516,26 @@ final class DefaultCamera: NSObject, Camera {
         let nextBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
         let nextSampleTime = CMTimeSubtract(sampleTime, recordingTimeOffset)
         if nextSampleTime > lastAppendedVideoSampleTime {
-          let _ = videoAdaptor?.append(nextBuffer!, withPresentationTime: nextSampleTime)
+          if let realtimeWatermark {
+            do {
+              guard let nextBuffer, let videoAdaptor else {
+                throw ProofshotRealtimeWatermark.failure("录像帧或编码适配器缺失。")
+              }
+              try autoreleasepool {
+                let rendered = try realtimeWatermark.render(nextBuffer)
+                guard videoAdaptor.append(rendered, withPresentationTime: nextSampleTime) else {
+                  throw videoWriter?.error
+                    ?? ProofshotRealtimeWatermark.failure("实时水印视频帧编码失败。")
+                }
+              }
+            } catch {
+              realtimeRecordingError = error
+              reportErrorMessage(error.localizedDescription)
+              return
+            }
+          } else {
+            let _ = videoAdaptor?.append(nextBuffer!, withPresentationTime: nextSampleTime)
+          }
           lastAppendedVideoSampleTime = nextSampleTime
         }
       } else {
@@ -1590,6 +1667,10 @@ final class DefaultCamera: NSObject, Camera {
       return
     }
     if !(audioWriterInput?.append(sampleBuffer) ?? false) {
+      if realtimeWatermark != nil {
+        realtimeRecordingError = videoWriter?.error
+          ?? ProofshotRealtimeWatermark.failure("实时录像音频写入失败。")
+      }
       reportErrorMessage("Unable to write to audio input")
     }
   }

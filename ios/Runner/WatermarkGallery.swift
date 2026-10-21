@@ -2,6 +2,7 @@ import AVKit
 import Flutter
 import Photos
 import UIKit
+import camera_avfoundation
 
 private enum WatermarkGalleryError: Error, LocalizedError {
   case invalidArguments(String)
@@ -281,8 +282,12 @@ private final class WatermarkMediaJournal {
     }
     let url = URL(fileURLWithPath: renderedPath).standardizedFileURL
     try validateTemporaryFile(url)
-    guard url.path != URL(fileURLWithPath: record.sourcePath).standardizedFileURL.path else {
-      throw WatermarkGalleryError.invalidArguments("The rendered file must differ from its source.")
+    if url.path == URL(fileURLWithPath: record.sourcePath).standardizedFileURL.path {
+      guard record.kind == "video",
+            url.lastPathComponent.hasPrefix(ProofshotRealtimeWatermark.filePrefix) else {
+        throw WatermarkGalleryError.invalidArguments("Only realtime watermarked video may reuse its source.")
+      }
+      try WatermarkBridge.verifyRealtimeRecording(url, snapshot: record.snapshot)
     }
     let expectedExtension = record.kind == "photo" ? "jpg" : "mp4"
     guard url.pathExtension.lowercased() == expectedExtension else {
@@ -707,12 +712,17 @@ final class WatermarkGalleryBridge {
 
     var localIdentifier: String?
     let renderedURL = URL(fileURLWithPath: renderedPath)
+    let resourceOptions = PHAssetResourceCreationOptions()
+    // 实时成品只有一个文件引用，PhotoKit 可直接接管文件，避免再复制整段视频。
+    resourceOptions.shouldMoveFile = record.kind == "video"
+      && renderedURL.standardizedFileURL.path
+        == URL(fileURLWithPath: record.sourcePath).standardizedFileURL.path
     PHPhotoLibrary.shared().performChanges {
       let request = PHAssetCreationRequest.forAsset()
       request.addResource(
         with: record.kind == "photo" ? .photo : .video,
         fileURL: renderedURL,
-        options: nil
+        options: resourceOptions
       )
       localIdentifier = request.placeholderForCreatedAsset?.localIdentifier
     } completionHandler: { [weak self] succeeded, error in

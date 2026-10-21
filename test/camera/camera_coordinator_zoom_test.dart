@@ -72,6 +72,8 @@ void main() {
         ResolutionPreset.veryHigh,
       );
       expect(platform.settings.last.enableAudio, isTrue);
+      expect(platform.settings.last.fps, 30);
+      expect(platform.imageFormats.last, ImageFormatGroup.yuv420);
       expect(platform.lastFocusPoint, const Point<double>(0.2, 0.8));
       expect(platform.lastFocusMode, FocusMode.auto);
       await coordinator.setCaptureMode(CameraCaptureMode.photo);
@@ -202,6 +204,85 @@ void main() {
         coordinator.zoomSteps.map((CameraZoomStep step) => step.label).toList(),
         <String>['0.54x', '1x', '2x'],
       );
+    } finally {
+      await coordinator.shutdown();
+      CameraPlatform.instance = original;
+    }
+  });
+
+  test('实时水印准备完成后才开始录像，准备期间保持初始化状态', () async {
+    final CameraPlatform original = CameraPlatform.instance;
+    final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
+    CameraPlatform.instance = platform;
+    final CameraCoordinator coordinator = CameraCoordinator();
+    final Completer<void> entered = Completer<void>();
+    final Completer<void> prepared = Completer<void>();
+    try {
+      await coordinator.initialize();
+      await coordinator.setCaptureMode(CameraCaptureMode.video);
+      final Future<bool> recording = coordinator.startVideoRecording(
+        onRecordingStarting: () async {
+          entered.complete();
+          await prepared.future;
+        },
+      );
+      await entered.future;
+      expect(coordinator.state, CameraSessionState.initializing);
+      expect(platform.recordingStartCount, 0);
+      prepared.complete();
+      expect(await recording, isTrue);
+      expect(platform.recordingStartCount, 1);
+    } finally {
+      await coordinator.shutdown();
+      CameraPlatform.instance = original;
+    }
+  });
+
+  test('实时水印准备失败直接报错，不录制无水印原片', () async {
+    final CameraPlatform original = CameraPlatform.instance;
+    final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
+    CameraPlatform.instance = platform;
+    final CameraCoordinator coordinator = CameraCoordinator();
+    try {
+      await coordinator.initialize();
+      await coordinator.setCaptureMode(CameraCaptureMode.video);
+      await expectLater(
+        coordinator.startVideoRecording(
+          onRecordingStarting: () async {
+            throw PlatformException(code: 'watermark_prepare_failed');
+          },
+        ),
+        throwsA(isA<PlatformException>()),
+      );
+      expect(platform.recordingStartCount, 0);
+      expect(coordinator.state, CameraSessionState.error);
+    } finally {
+      await coordinator.shutdown();
+      CameraPlatform.instance = original;
+    }
+  });
+
+  test('准备实时水印期间进入后台时取消录像启动', () async {
+    final CameraPlatform original = CameraPlatform.instance;
+    final _ZoomCameraPlatform platform = _ZoomCameraPlatform();
+    CameraPlatform.instance = platform;
+    final CameraCoordinator coordinator = CameraCoordinator();
+    final Completer<void> entered = Completer<void>();
+    final Completer<void> prepared = Completer<void>();
+    try {
+      await coordinator.initialize();
+      await coordinator.setCaptureMode(CameraCaptureMode.video);
+      final Future<bool> recording = coordinator.startVideoRecording(
+        onRecordingStarting: () async {
+          entered.complete();
+          await prepared.future;
+        },
+      );
+      await entered.future;
+      coordinator.didChangeAppLifecycleState(AppLifecycleState.inactive);
+      prepared.complete();
+      expect(await recording, isFalse);
+      expect(platform.recordingStartCount, 0);
     } finally {
       await coordinator.shutdown();
       CameraPlatform.instance = original;
@@ -359,8 +440,10 @@ class _ZoomCameraPlatform extends CameraPlatform {
   FocusMode? lastFocusMode;
   Point<double>? lastFocusPoint;
   int photoCount = 0;
+  int recordingStartCount = 0;
   Completer<XFile>? nextPhoto;
   final List<MediaSettings> settings = <MediaSettings>[];
+  final List<ImageFormatGroup> imageFormats = <ImageFormatGroup>[];
 
   @override
   Future<List<CameraDescription>> availableCameras() async =>
@@ -382,7 +465,9 @@ class _ZoomCameraPlatform extends CameraPlatform {
   Future<void> initializeCamera(
     int cameraId, {
     ImageFormatGroup imageFormatGroup = ImageFormatGroup.unknown,
-  }) async {}
+  }) async {
+    imageFormats.add(imageFormatGroup);
+  }
 
   @override
   Stream<CameraInitializedEvent> onCameraInitialized(int cameraId) =>
@@ -436,7 +521,9 @@ class _ZoomCameraPlatform extends CameraPlatform {
   }
 
   @override
-  Future<void> startVideoCapturing(VideoCaptureOptions options) async {}
+  Future<void> startVideoCapturing(VideoCaptureOptions options) async {
+    recordingStartCount++;
+  }
 
   @override
   Future<void> pauseVideoRecording(int cameraId) async {}

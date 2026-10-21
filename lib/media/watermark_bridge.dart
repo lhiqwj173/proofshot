@@ -12,6 +12,17 @@ class RecentCaptureThumbnail {
 class WatermarkBridge {
   static const MethodChannel _channel = MethodChannel('proofshot/watermark');
 
+  Future<void> prepareVideoRecording({required WatermarkSnapshot snapshot}) {
+    return _channel.invokeMethod<void>(
+      'prepareVideoRecording',
+      <String, Object?>{'snapshot': snapshot.toMap()},
+    );
+  }
+
+  Future<void> cancelVideoPreparation() {
+    return _channel.invokeMethod<void>('cancelVideoPreparation');
+  }
+
   Future<String> renderPhoto({
     required String sourcePath,
     required WatermarkSnapshot snapshot,

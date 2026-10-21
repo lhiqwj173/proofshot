@@ -355,7 +355,9 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
-  Future<bool> startVideoRecording({void Function()? onRecordingStarting}) {
+  Future<bool> startVideoRecording({
+    FutureOr<void> Function()? onRecordingStarting,
+  }) {
     _ensureOpen();
     return _run<bool>(() async {
       if (_state != CameraSessionState.ready ||
@@ -381,12 +383,19 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
       }
 
       final CameraController controller = _requireController();
-      onRecordingStarting?.call();
       _setState(CameraSessionState.initializing);
       try {
+        await onRecordingStarting?.call();
+        if (_isBackgrounded || _isShuttingDown) {
+          _setState(CameraSessionState.interrupted);
+          return false;
+        }
         await controller.startVideoRecording();
       } on CameraException catch (error) {
         _recordCameraException(error);
+        rethrow;
+      } on Object {
+        _setState(CameraSessionState.error);
         rethrow;
       }
       _setState(CameraSessionState.recording);
@@ -575,6 +584,10 @@ class CameraCoordinator extends ChangeNotifier with WidgetsBindingObserver {
           ? ResolutionPreset.max
           : ResolutionPreset.veryHigh,
       enableAudio: enableAudio,
+      fps: _captureMode == CameraCaptureMode.video ? 30 : null,
+      imageFormatGroup: _captureMode == CameraCaptureMode.video
+          ? ImageFormatGroup.yuv420
+          : null,
     );
     _setState(CameraSessionState.initializing);
 

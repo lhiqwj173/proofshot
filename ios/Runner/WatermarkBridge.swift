@@ -3,10 +3,12 @@ import AudioToolbox
 import CoreGraphics
 import CoreImage
 import CoreMedia
+import CryptoKit
 import Flutter
 import Foundation
 import ImageIO
 import UIKit
+import camera_avfoundation
 
 private enum WatermarkBridgeError: Error, LocalizedError {
   case invalidArguments(String)
@@ -91,6 +93,19 @@ private struct WatermarkSnapshotData {
   let locationText: String
   let customText: String
   let brandText: String
+
+  var realtimeToken: String {
+    get throws {
+      let fields = [
+        "capturedAt": capturedAt, "timeText": timeText, "dateText": dateText,
+        "weekdayText": weekdayText, "locationText": locationText,
+        "customText": customText, "brandText": brandText,
+      ]
+      let data = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
+      return "proofshot.realtime.v1:" + SHA256.hash(data: data)
+        .map { String(format: "%02x", $0) }.joined()
+    }
+  }
 
   init(value: Any?) throws {
     guard let fields = value as? [String: Any] else {
@@ -284,6 +299,11 @@ final class WatermarkBridge {
       handlePhotoRender(call.arguments, result: result)
     case "renderVideo":
       handleVideoRender(call.arguments, result: result)
+    case "prepareVideoRecording":
+      handleVideoPreparation(call.arguments, result: result)
+    case "cancelVideoPreparation":
+      ProofshotRealtimeWatermark.cancelPreparation()
+      result(nil)
     case "updateRecentThumbnail":
       handleRecentThumbnailUpdate(call.arguments, result: result)
     case "recentThumbnail":
@@ -457,6 +477,23 @@ final class WatermarkBridge {
     }
   }
 
+  private func handleVideoPreparation(_ arguments: Any?, result: @escaping FlutterResult) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      do {
+        guard let fields = arguments as? [String: Any], Set(fields.keys) == Set(["snapshot"]) else {
+          throw WatermarkBridgeError.invalidArguments("prepareVideoRecording expects a snapshot.")
+        }
+        let snapshot = try WatermarkSnapshotData(value: fields["snapshot"])
+        let overlay = try Self.makeWatermarkOverlay(snapshot, size: ProofshotRealtimeWatermark.size)
+        try ProofshotRealtimeWatermark.prepare(overlay: overlay, token: snapshot.realtimeToken)
+        DispatchQueue.main.async { result(nil) }
+      } catch {
+        let flutterError = Self.flutterError(for: error)
+        DispatchQueue.main.async { result(flutterError) }
+      }
+    }
+  }
+
   private func handleVideoRender(_ arguments: Any?, result: @escaping FlutterResult) {
     let request: VideoRenderRequest
     do {
@@ -577,6 +614,13 @@ final class WatermarkBridge {
         throw WatermarkBridgeError.missingAudioTrack
       }
 
+      if request.sourceURL.lastPathComponent.hasPrefix(ProofshotRealtimeWatermark.filePrefix) {
+        try verifyRealtimeRecording(asset, snapshot: request.snapshot)
+        // 录像文件已经是成品。禁止复制、导出或重新编码。
+        completion(.success(request.sourceURL))
+        return
+      }
+
       let naturalSize = videoTrack.naturalSize
       guard naturalSize.width.isFinite, naturalSize.height.isFinite,
             naturalSize.width > 0, naturalSize.height > 0
@@ -695,6 +739,24 @@ final class WatermarkBridge {
     } catch {
       completion(.failure(error))
     }
+  }
+
+  static func verifyRealtimeRecording(_ url: URL, snapshot: [String: String]) throws {
+    try validateTemporaryFile(url)
+    try verifyRealtimeRecording(AVURLAsset(url: url), snapshot: WatermarkSnapshotData(value: snapshot))
+  }
+
+  private static func verifyRealtimeRecording(
+    _ asset: AVURLAsset, snapshot: WatermarkSnapshotData
+  ) throws {
+    let identifier = AVMetadataIdentifier(rawValue: "mdta/" + ProofshotRealtimeWatermark.metadataKey)
+    let receipts = AVMetadataItem.metadataItems(from: asset.metadata, filteredByIdentifier: identifier)
+    let expectedToken = try snapshot.realtimeToken
+    guard receipts.count == 1, receipts[0].stringValue == expectedToken else {
+      throw WatermarkBridgeError.invalidRenderedVideo("实时录像水印标识缺失或与拍摄快照不一致。")
+    }
+    try verifyRenderedVideo(asset.url, expectedDuration: CMTimeGetSeconds(asset.duration),
+                            expectedSize: ProofshotRealtimeWatermark.size)
   }
 
   private static func makeWatermarkOverlay(

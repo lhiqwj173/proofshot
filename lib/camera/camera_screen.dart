@@ -401,9 +401,14 @@ class _CameraScreenState extends State<CameraScreen> {
       final bool started = await RuntimeLogs.instance.trace(
         'camera.start_recording',
         () => _cameraCoordinator.startVideoRecording(
-          onRecordingStarting: () {
-            snapshot = _snapshotAt(location, DateTime.now());
-            _recordingSnapshot = snapshot;
+          onRecordingStarting: () async {
+            final WatermarkSnapshot frozen = _snapshotAt(
+              location,
+              DateTime.now(),
+            );
+            snapshot = frozen;
+            _recordingSnapshot = frozen;
+            await _watermarkBridge.prepareVideoRecording(snapshot: frozen);
           },
         ),
       );
@@ -422,9 +427,11 @@ class _CameraScreenState extends State<CameraScreen> {
         }
       } else {
         _recordingSnapshot = null;
+        await _watermarkBridge.cancelVideoPreparation();
       }
     } on Object catch (error) {
       _recordingSnapshot = null;
+      await _watermarkBridge.cancelVideoPreparation();
       _showMediaError(error);
     }
   }
