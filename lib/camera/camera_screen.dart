@@ -1136,20 +1136,36 @@ class _CameraScreenState extends State<CameraScreen> {
         : _cameraCoordinator.captureMode == CameraCaptureMode.photo
         ? '拍摄照片'
         : '开始录像';
-    final Widget centerMark =
-        cameraState == CameraSessionState.processing ||
+    final bool capturing =
+        cameraState != CameraSessionState.recording &&
+        (cameraState == CameraSessionState.processing ||
             (_cameraCoordinator.captureMode == CameraCaptureMode.photo
                 ? !_photoCaptureAvailable
-                : _mediaBusy)
+                : _mediaBusy));
+    final String label = isRecording
+        ? '停止'
+        : capturing
+        ? '处理中'
+        : _cameraCoordinator.captureMode == CameraCaptureMode.photo
+        ? '拍照'
+        : '录像';
+    final Widget centerMark = capturing
         ? const SizedBox.square(
-            dimension: 28,
+            dimension: 24,
             child: CircularProgressIndicator(
               strokeWidth: 3,
-              color: _accentColor,
+              color: AppPalette.surface,
             ),
           )
         : isRecording
-        ? const Icon(Icons.stop_rounded, size: 30, color: Colors.white)
+        ? Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: _recordingColor,
+              borderRadius: BorderRadius.circular(5),
+            ),
+          )
         : _cameraCoordinator.captureMode == CameraCaptureMode.video
         ? const DecoratedBox(
             decoration: BoxDecoration(
@@ -1165,35 +1181,72 @@ class _CameraScreenState extends State<CameraScreen> {
       label: tooltip,
       child: Tooltip(
         message: tooltip,
-        // 触摸区比可见圆环更大，单手握持时也能一次按中。
-        child: SizedBox.square(
-          dimension: 116,
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onPressed,
-              customBorder: const CircleBorder(),
-              child: Center(
-                child: SizedBox.square(
-                  dimension: 92,
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.white.withValues(
-                          alpha: onPressed == null ? 0.34 : 0.92,
+        // 整块卡片都是快门触摸区，和参考模块一样不必瞄准圆环。
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 180),
+          opacity: onPressed == null ? 0.55 : 1,
+          child: SizedBox(
+            height: 116,
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(28),
+              clipBehavior: Clip.antiAlias,
+              child: Ink(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.16),
+                  ),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: <Color>[Color(0xFF2A2C2F), Color(0xFF1B1C1F)],
+                  ),
+                ),
+                child: InkWell(
+                  onTap: onPressed,
+                  child: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        SizedBox.square(
+                          dimension: 64,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.94),
+                                width: 2,
+                              ),
+                            ),
+                            child: Container(
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white,
+                              ),
+                              alignment: Alignment.center,
+                              child: centerMark,
+                            ),
+                          ),
                         ),
-                        width: 3,
-                      ),
-                    ),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: isRecording ? _recordingColor : Colors.white,
-                      ),
-                      alignment: Alignment.center,
-                      child: centerMark,
+                        const SizedBox(width: 14),
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              label,
+                              textScaler: TextScaler.noScaling,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w500,
+                                letterSpacing: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -1582,19 +1635,11 @@ class _CameraScreenState extends State<CameraScreen> {
           else
             Row(
               children: <Widget>[
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: _buildGalleryControl(cameraState),
-                  ),
-                ),
-                _buildCaptureButton(cameraState),
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: _buildCameraSwitchControl(canChangeMode),
-                  ),
-                ),
+                _buildGalleryControl(cameraState),
+                const SizedBox(width: 14),
+                Expanded(child: _buildCaptureButton(cameraState)),
+                const SizedBox(width: 14),
+                _buildCameraSwitchControl(canChangeMode),
               ],
             ),
           if (!recording) ...<Widget>[
