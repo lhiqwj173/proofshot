@@ -1015,12 +1015,13 @@ class _CameraScreenState extends State<CameraScreen> {
           ? () => unawaited(_cameraCoordinator.switchCamera())
           : null,
       style: IconButton.styleFrom(
-        fixedSize: const Size(52, 52),
-        backgroundColor: AppPalette.translucentPill,
+        fixedSize: const Size(82, 42),
+        backgroundColor: const Color(0xFF18191B),
         foregroundColor: canSwitch ? Colors.white : Colors.white38,
-        shape: const CircleBorder(),
+        side: const BorderSide(color: Color(0x0DFFFFFF)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
-      icon: const Icon(Icons.cameraswitch_rounded, size: 27),
+      icon: const Icon(Icons.cameraswitch_rounded, size: 24),
     );
   }
 
@@ -1056,20 +1057,22 @@ class _CameraScreenState extends State<CameraScreen> {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(28),
+        color: const Color(0xFF121315),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x0AFFFFFF)),
       ),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           _buildCaptureModeOption(
-            mode: CameraCaptureMode.video,
-            label: '视频',
-            canChangeMode: canChangeMode,
-          ),
-          _buildCaptureModeOption(
             mode: CameraCaptureMode.photo,
             label: '照片',
+            canChangeMode: canChangeMode,
+          ),
+          const SizedBox(height: 4),
+          _buildCaptureModeOption(
+            mode: CameraCaptureMode.video,
+            label: '视频',
             canChangeMode: canChangeMode,
           ),
         ],
@@ -1088,24 +1091,25 @@ class _CameraScreenState extends State<CameraScreen> {
       selected: selected,
       label: label,
       child: InkWell(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(13),
         onTap: !canChangeMode || selected
             ? null
             : () => unawaited(_cameraCoordinator.setCaptureMode(mode)),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          width: 76,
-          height: 40,
+          width: double.infinity,
+          height: 38,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: selected ? AppPalette.translucentPill : Colors.transparent,
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(13),
           ),
           child: Text(
             label,
+            textScaler: TextScaler.noScaling,
             style: TextStyle(
               color: selected ? _cameraYellow : Colors.white70,
-              fontSize: 15,
+              fontSize: 13,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
             ),
           ),
@@ -1185,69 +1189,64 @@ class _CameraScreenState extends State<CameraScreen> {
         child: AnimatedOpacity(
           duration: const Duration(milliseconds: 180),
           opacity: onPressed == null ? 0.55 : 1,
-          child: SizedBox(
-            height: 116,
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(28),
-              clipBehavior: Clip.antiAlias,
-              child: Ink(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.16),
-                  ),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: <Color>[Color(0xFF2A2C2F), Color(0xFF1B1C1F)],
-                  ),
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(30),
+            clipBehavior: Clip.antiAlias,
+            child: Ink(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: <Color>[Color(0xFF2A2C2F), Color(0xFF1B1C1F)],
                 ),
-                child: InkWell(
-                  onTap: onPressed,
-                  child: Center(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        SizedBox.square(
-                          dimension: 64,
+              ),
+              child: InkWell(
+                onTap: onPressed,
+                child: Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      SizedBox.square(
+                        dimension: 72,
+                        child: Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.94),
+                              width: 2,
+                            ),
+                          ),
                           child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
+                            decoration: const BoxDecoration(
                               shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.94),
-                                width: 2,
-                              ),
+                              color: Colors.white,
                             ),
-                            child: Container(
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white,
-                              ),
-                              alignment: Alignment.center,
-                              child: centerMark,
+                            alignment: Alignment.center,
+                            child: centerMark,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            label,
+                            textScaler: TextScaler.noScaling,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 2,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 14),
-                        Flexible(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              label,
-                              textScaler: TextScaler.noScaling,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w500,
-                                letterSpacing: 2,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -1485,6 +1484,7 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget _buildTopBar(CameraSessionState cameraState) {
     return Row(
       children: <Widget>[
+        _buildGalleryControl(cameraState),
         const Spacer(),
         Row(
           mainAxisSize: MainAxisSize.min,
@@ -1615,7 +1615,7 @@ class _CameraScreenState extends State<CameraScreen> {
     final List<CameraZoomStep> steps = _cameraCoordinator.zoomSteps;
     final bool showZoom = _zoomPanelVisible && steps.isNotEmpty;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -1630,22 +1630,33 @@ class _CameraScreenState extends State<CameraScreen> {
                   )
                 : const SizedBox(width: double.infinity),
           ),
-          if (recording)
-            _buildRecordingControls()
-          else
-            Row(
+          SizedBox(
+            height: 156,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                _buildGalleryControl(cameraState),
+                SizedBox(
+                  width: 82,
+                  child: recording
+                      ? const Center(child: _RecordingBadge())
+                      : Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: <Widget>[
+                            _buildCameraSwitchControl(canChangeMode),
+                            const SizedBox(height: 8),
+                            _buildCaptureModeControl(canChangeMode),
+                          ],
+                        ),
+                ),
                 const SizedBox(width: 14),
-                Expanded(child: _buildCaptureButton(cameraState)),
-                const SizedBox(width: 14),
-                _buildCameraSwitchControl(canChangeMode),
+                Expanded(
+                  child: recording
+                      ? _buildRecordingControls()
+                      : _buildCaptureButton(cameraState),
+                ),
               ],
             ),
-          if (!recording) ...<Widget>[
-            const SizedBox(height: 12),
-            _buildCaptureModeControl(canChangeMode),
-          ],
+          ),
         ],
       ),
     );
@@ -1973,6 +1984,37 @@ class _LocationConfirmationDialogState
         TextButton(
           onPressed: canConfirm ? () => Navigator.of(context).pop(value) : null,
           child: const Text('使用此地点'),
+        ),
+      ],
+    );
+  }
+}
+
+class _RecordingBadge extends StatelessWidget {
+  const _RecordingBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Container(
+          width: 9,
+          height: 9,
+          decoration: const BoxDecoration(
+            color: AppPalette.recording,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          '录制中',
+          textScaler: TextScaler.noScaling,
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 12,
+            letterSpacing: 1,
+          ),
         ),
       ],
     );
