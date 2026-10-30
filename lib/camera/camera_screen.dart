@@ -59,7 +59,11 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _settingsOpen = false;
   bool _galleryOpen = false;
   bool? _hardwareCaptureEnabled;
+  static const Duration _zoomPanelHoldDuration = Duration(milliseconds: 1600);
   bool _zoomGestureActive = false;
+  bool _zoomPanelVisible = false;
+  Timer? _zoomHideTimer;
+  DateTime? _zoomInteractionAt;
   double _zoomStartFactor = 1;
   bool _focusBusy = false;
   bool _recordingActionBusy = false;
@@ -105,6 +109,7 @@ class _CameraScreenState extends State<CameraScreen> {
   void dispose() {
     _isShuttingDown = true;
     _recordingTicker?.cancel();
+    _zoomHideTimer?.cancel();
     _captureSuccessTimer?.cancel();
     _recordingClock.stop();
     widget.settings.removeListener(_handleSettingsChanged);
@@ -785,12 +790,16 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
     _zoomStartFactor = _cameraCoordinator.zoomFactor;
+    if (details.pointerCount >= 2) {
+      _revealZoomPanel();
+    }
   }
 
   void _handleZoomGestureUpdate(ScaleUpdateDetails details) {
     if (!_canZoom || details.pointerCount < 2) {
       return;
     }
+    _revealZoomPanel();
     if (!_zoomGestureActive) {
       setState(() => _zoomGestureActive = true);
     }
@@ -811,12 +820,47 @@ class _CameraScreenState extends State<CameraScreen> {
     }
   }
 
+  /// 变焦控件只在捏合或点选后短暂出现，避免长期占据快门上方。
+  void _revealZoomPanel() {
+    _zoomInteractionAt = DateTime.now();
+    if (!_zoomPanelVisible) {
+      setState(() => _zoomPanelVisible = true);
+    }
+    _zoomHideTimer ??= Timer(_zoomPanelHoldDuration, _hideZoomPanelIfIdle);
+  }
+
+  void _hideZoomPanelIfIdle() {
+    _zoomHideTimer = null;
+    if (!mounted) {
+      return;
+    }
+    final DateTime? lastInteraction = _zoomInteractionAt;
+    final Duration idle = lastInteraction == null
+        ? _zoomPanelHoldDuration
+        : DateTime.now().difference(lastInteraction);
+    if (_zoomGestureActive || idle < _zoomPanelHoldDuration) {
+      // 捏合仍在进行时多确认一次，避免手势未结束就收起控件。
+      final Duration remaining = _zoomPanelHoldDuration - idle;
+      _zoomHideTimer = Timer(
+        _zoomGestureActive || remaining <= Duration.zero
+            ? const Duration(milliseconds: 200)
+            : remaining,
+        _hideZoomPanelIfIdle,
+      );
+      return;
+    }
+    if (_zoomPanelVisible) {
+      setState(() => _zoomPanelVisible = false);
+    }
+  }
+
   void _selectZoomStep(CameraZoomStep step) {
     final CameraSessionState state = _cameraCoordinator.state;
     if (state != CameraSessionState.ready &&
         state != CameraSessionState.recording) {
       return;
     }
+    _revealZoomPanel();
     _cameraCoordinator.setZoomFactor(step.factor);
   }
 
@@ -1121,31 +1165,37 @@ class _CameraScreenState extends State<CameraScreen> {
       label: tooltip,
       child: Tooltip(
         message: tooltip,
+        // 触摸区比可见圆环更大，单手握持时也能一次按中。
         child: SizedBox.square(
-          dimension: 82,
+          dimension: 116,
           child: Material(
             color: Colors.transparent,
             child: InkWell(
               onTap: onPressed,
               customBorder: const CircleBorder(),
-              child: Container(
-                padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withValues(
-                      alpha: onPressed == null ? 0.34 : 0.92,
+              child: Center(
+                child: SizedBox.square(
+                  dimension: 92,
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(
+                          alpha: onPressed == null ? 0.34 : 0.92,
+                        ),
+                        width: 3,
+                      ),
                     ),
-                    width: 3,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isRecording ? _recordingColor : Colors.white,
+                      ),
+                      alignment: Alignment.center,
+                      child: centerMark,
+                    ),
                   ),
-                ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isRecording ? _recordingColor : Colors.white,
-                  ),
-                  alignment: Alignment.center,
-                  child: centerMark,
                 ),
               ),
             ),
@@ -1510,27 +1560,23 @@ class _CameraScreenState extends State<CameraScreen> {
     final bool recording = cameraState == CameraSessionState.recording;
     final bool canChangeMode = cameraState == CameraSessionState.ready;
     final List<CameraZoomStep> steps = _cameraCoordinator.zoomSteps;
+    final bool showZoom = _zoomPanelVisible && steps.isNotEmpty;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          if (steps.isNotEmpty)
-            IgnorePointer(
-              ignoring: !_canZoom,
-              child: CameraZoomControl(
-                steps: steps,
-                factor: _cameraCoordinator.zoomFactor,
-                minimumFactor: _cameraCoordinator.minimumZoomFactor,
-                maximumFactor: _cameraCoordinator.maximumZoomFactor,
-                showDial: _zoomGestureActive,
-                onFactorChanged: _cameraCoordinator.setZoomFactor,
-                onStepSelected: _selectZoomStep,
-              ),
-            )
-          else
-            const SizedBox(height: 70),
-          const SizedBox(height: 10),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.bottomCenter,
+            child: showZoom
+                ? Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _buildZoomControl(steps),
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
           if (recording)
             _buildRecordingControls()
           else
@@ -1552,10 +1598,28 @@ class _CameraScreenState extends State<CameraScreen> {
               ],
             ),
           if (!recording) ...<Widget>[
-            const SizedBox(height: 36),
+            const SizedBox(height: 12),
             _buildCaptureModeControl(canChangeMode),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildZoomControl(List<CameraZoomStep> steps) {
+    return IgnorePointer(
+      ignoring: !_canZoom,
+      child: CameraZoomControl(
+        steps: steps,
+        factor: _cameraCoordinator.zoomFactor,
+        minimumFactor: _cameraCoordinator.minimumZoomFactor,
+        maximumFactor: _cameraCoordinator.maximumZoomFactor,
+        showDial: _zoomGestureActive,
+        onFactorChanged: (double factor) {
+          _revealZoomPanel();
+          _cameraCoordinator.setZoomFactor(factor);
+        },
+        onStepSelected: _selectZoomStep,
       ),
     );
   }
@@ -1703,9 +1767,9 @@ class _CameraScreenState extends State<CameraScreen> {
                 ),
               ),
               Positioned(
-                top: frameBottom - 70,
                 left: 0,
                 right: 0,
+                bottom: safePadding.bottom,
                 child: _buildControlPanel(cameraState),
               ),
             ],
