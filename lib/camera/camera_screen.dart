@@ -1053,30 +1053,38 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
-  Widget _buildCaptureModeControl(bool canChangeMode) {
+  Widget _buildCaptureModeControl(
+    bool canChangeMode, {
+    bool horizontal = false,
+  }) {
+    final Widget photo = _buildCaptureModeOption(
+      mode: CameraCaptureMode.photo,
+      label: '照片',
+      canChangeMode: canChangeMode,
+      horizontal: horizontal,
+    );
+    final Widget video = _buildCaptureModeOption(
+      mode: CameraCaptureMode.video,
+      label: '视频',
+      canChangeMode: canChangeMode,
+      horizontal: horizontal,
+    );
     return Container(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: const Color(0xFF121315),
-        borderRadius: BorderRadius.circular(18),
+        color: horizontal ? const Color(0x661C1C1E) : const Color(0xFF121315),
+        borderRadius: BorderRadius.circular(horizontal ? 21 : 18),
         border: Border.all(color: const Color(0x0AFFFFFF)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          _buildCaptureModeOption(
-            mode: CameraCaptureMode.photo,
-            label: '照片',
-            canChangeMode: canChangeMode,
-          ),
-          const SizedBox(height: 4),
-          _buildCaptureModeOption(
-            mode: CameraCaptureMode.video,
-            label: '视频',
-            canChangeMode: canChangeMode,
-          ),
-        ],
-      ),
+      child: horizontal
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[photo, const SizedBox(width: 2), video],
+            )
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[photo, const SizedBox(height: 4), video],
+            ),
     );
   }
 
@@ -1084,25 +1092,31 @@ class _CameraScreenState extends State<CameraScreen> {
     required CameraCaptureMode mode,
     required String label,
     required bool canChangeMode,
+    required bool horizontal,
   }) {
     final bool selected = _cameraCoordinator.captureMode == mode;
+    final double radius = horizontal ? 18 : 15;
     return Semantics(
       button: true,
       selected: selected,
       label: label,
       child: InkWell(
-        borderRadius: BorderRadius.circular(13),
+        borderRadius: BorderRadius.circular(radius),
         onTap: !canChangeMode || selected
             ? null
             : () => unawaited(_cameraCoordinator.setCaptureMode(mode)),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          width: double.infinity,
-          height: 38,
+          width: horizontal ? 56 : double.infinity,
+          height: horizontal ? 36 : 38,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: selected ? AppPalette.translucentPill : Colors.transparent,
-            borderRadius: BorderRadius.circular(13),
+            color: selected
+                ? (horizontal
+                      ? AppPalette.elevatedSurface
+                      : AppPalette.translucentPill)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(radius),
           ),
           child: Text(
             label,
@@ -1484,8 +1498,20 @@ class _CameraScreenState extends State<CameraScreen> {
   Widget _buildTopBar(CameraSessionState cameraState) {
     return Row(
       children: <Widget>[
-        _buildGalleryControl(cameraState),
-        const Spacer(),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: _buildCaptureModeControl(
+                cameraState == CameraSessionState.ready,
+                horizontal: true,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
         Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
@@ -1529,42 +1555,40 @@ class _CameraScreenState extends State<CameraScreen> {
       label: '浏览照片与视频',
       child: Tooltip(
         message: '浏览照片与视频',
-        child: SizedBox.square(
-          dimension: 52,
+        child: SizedBox(
+          width: 82,
+          height: 88,
           child: Material(
             color: Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            clipBehavior: Clip.antiAlias,
             child: InkWell(
-              borderRadius: BorderRadius.circular(26),
               onTap: enabled ? _openGallery : null,
               child: Stack(
                 fit: StackFit.expand,
                 children: <Widget>[
                   if (_recentThumbnailBytes case final Uint8List bytes)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(26),
-                      child: Image.memory(
-                        bytes,
-                        fit: BoxFit.cover,
-                        cacheWidth: 480,
-                        gaplessPlayback: true,
-                      ),
+                    Image.memory(
+                      bytes,
+                      fit: BoxFit.cover,
+                      cacheWidth: 480,
+                      gaplessPlayback: true,
                     )
                   else
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: AppPalette.surface,
-                        borderRadius: BorderRadius.circular(26),
-                      ),
-                      child: const Icon(
-                        Icons.photo_library_outlined,
-                        color: Colors.white,
-                        size: 28,
+                    const ColoredBox(
+                      color: AppPalette.surface,
+                      child: Center(
+                        child: Icon(
+                          Icons.photo_library_outlined,
+                          color: Colors.white,
+                          size: 28,
+                        ),
                       ),
                     ),
                   if (_recentThumbnail?.kind == 'video')
                     const Positioned(
-                      top: 4,
-                      left: 4,
+                      top: 6,
+                      left: 6,
                       child: Icon(
                         Icons.play_circle_fill_rounded,
                         color: Colors.white,
@@ -1576,8 +1600,8 @@ class _CameraScreenState extends State<CameraScreen> {
                     ),
                   if (_mediaBusy)
                     const Positioned(
-                      top: 5,
-                      right: 5,
+                      top: 7,
+                      right: 7,
                       child: SizedBox.square(
                         dimension: 16,
                         child: CircularProgressIndicator(
@@ -1644,7 +1668,7 @@ class _CameraScreenState extends State<CameraScreen> {
                           children: <Widget>[
                             _buildCameraSwitchControl(canChangeMode),
                             const SizedBox(height: 8),
-                            _buildCaptureModeControl(canChangeMode),
+                            _buildGalleryControl(cameraState),
                           ],
                         ),
                 ),
